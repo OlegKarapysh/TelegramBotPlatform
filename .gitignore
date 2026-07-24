@@ -1,0 +1,43 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+x64/
+x86/
+artifacts/
+
+# .NET
+project.lock.json
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test results
+[Tt]est[Rr]esult*/
+TestResults/
+*.coverage
+*.coveragexml
+
+# Rider / IntelliJ
+.idea/
+
+# Visual Studio
+.vs/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Local docker-compose secrets (e.g. POSTGRES_PASSWORD)
+.env
+
+# Operator-uploaded behavior extension assemblies (loaded at runtime)
+src/TelegramBotPlatform.WebApi/plugins/
+
+# MSBuild Binary and Structured Log
+*.binlog
