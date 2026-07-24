@@ -1,0 +1,11 @@
+global using System.Collections.Concurrent;
+global using FluentResults;
+global using MassTransit;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+global using Telegram.Bot;
+global using Telegram.Bot.Types;
+global using TelegramBotPlatform.Public;
+global using TelegramBotPlatform.Public.Behaviors;
+global using TelegramBotPlatform.Public.Bots;
+global using TelegramBotPlatform.Public.Messaging;

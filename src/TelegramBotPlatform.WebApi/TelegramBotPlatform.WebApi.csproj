@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <UserSecretsId>a1b2c3d4-e5f6-47a8-9b0c-1d2e3f4a5b6c</UserSecretsId>
+        <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="MassTransit" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include="..\..\.dockerignore">
+        <Link>.dockerignore</Link>
+      </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\TelegramBotPlatform.Application\TelegramBotPlatform.Application.csproj" />
+      <ProjectReference Include="..\TelegramBotPlatform.Infrastructure\TelegramBotPlatform.Infrastructure.csproj" />
+      <ProjectReference Include="..\TelegramBotPlatform.Public\TelegramBotPlatform.Public.csproj" />
+    </ItemGroup>
+
+</Project>

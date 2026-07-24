@@ -1,0 +1,58 @@
+<Project>
+  <!--
+    Central Package Management (CPM): every NuGet version lives here, once.
+    Individual .csproj files reference packages WITHOUT a Version attribute.
+    Docs: https://learn.microsoft.com/nuget/consume-packages/central-package-management
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Lets a PackageVersion entry below pin a *transitive* dependency without a direct
+         PackageReference — used to force the patched MessagePack (see the Messaging / Bot group). -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup Label="Messaging / Bot">
+    <PackageVersion Include="MassTransit" Version="8.5.9" />
+    <PackageVersion Include="MassTransit.Abstractions" Version="8.5.9" />
+    <PackageVersion Include="Telegram.Bot" Version="22.9.5.3" />
+    <!-- Transitively pinned (CentralPackageTransitivePinningEnabled). MassTransit pulls
+         MessagePack >= 3.1.4, but 3.1.4 has a known high-severity vulnerability (GHSA-hv8m-jj95-wg3x);
+         3.1.7 is the first patched 3.x release and satisfies MassTransit's constraint. -->
+    <PackageVersion Include="MessagePack" Version="3.1.7" />
+  </ItemGroup>
+  <ItemGroup Label="Results">
+    <PackageVersion Include="FluentResults" Version="4.0.0" />
+  </ItemGroup>
+  <ItemGroup Label="Persistence">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+  </ItemGroup>
+  <ItemGroup Label="Microsoft.Extensions / ASP.NET Core">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.1" />
+    <!-- Persists the Data Protection key ring (used to encrypt bot tokens at rest) to Postgres via EF. -->
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.8" />
+    <!-- Transitively pinned (CentralPackageTransitivePinningEnabled). DataProtection.EntityFrameworkCore
+         pulls System.Security.Cryptography.Xml 10.0.8, which has known high-severity advisories
+         (GHSA-23rf-6693-g89p and others); 10.0.10 is the patched servicing release. -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <!-- Transitively pinned (CentralPackageTransitivePinningEnabled). Microsoft.AspNetCore.OpenApi 10.0.1
+         pulls Microsoft.OpenApi 2.0.0, which has a known high-severity vulnerability (GHSA-v5pm-xwqc-g5wc);
+         2.7.5 is the first patched 2.x release and satisfies the >= 2.0.0 constraint. -->
+    <PackageVersion Include="Microsoft.OpenApi" Version="2.7.5" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.8" />
+  </ItemGroup>
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="xunit.v3.mtp-v2" Version="3.2.2" />
+  </ItemGroup>
+</Project>

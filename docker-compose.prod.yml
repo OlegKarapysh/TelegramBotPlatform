@@ -1,0 +1,64 @@
+# Production stack: Postgres + a one-off migration runner + the platform host.
+#
+# `depends_on` ordering guarantees Postgres becomes healthy -> `migrate` applies EF migrations
+# and exits -> `app` starts. Provide the secret env files referenced below (root-only, never
+# committed): db.env (POSTGRES_PASSWORD), conn.env (Persistence__ConnectionString), and
+# app.env (Platform__AdminApiKey, Platform__WebhookBaseUrl, ...).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: telegrambotplatform
+      POSTGRES_USER: telegrambotplatform
+    env_file:
+      - db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegrambotplatform -d telegrambotplatform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: src/TelegramBotPlatform.WebApi/Dockerfile
+    command: ["migrate"]
+    env_file:
+      - conn.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      dockerfile: src/TelegramBotPlatform.WebApi/Dockerfile
+    env_file:
+      - conn.env
+      - app.env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - plugins:/app/plugins
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  plugins:

@@ -1,0 +1,63 @@
+@host = http://localhost:8080
+@adminKey = replace-with-your-Platform-AdminApiKey
+@botToken = 123456:replace-with-a-BotFather-token
+
+### Liveness probe (no auth)
+GET {{host}}/health
+
+### List available behaviors (built-in + uploaded extensions)
+GET {{host}}/admin/behaviors
+Authorization: Bearer {{adminKey}}
+
+### Register a new bot with the built-in echo behavior
+POST {{host}}/admin/bots
+Authorization: Bearer {{adminKey}}
+Content-Type: application/json
+
+{
+  "label": "My Echo Bot",
+  "behaviorKey": "echo",
+  "token": "{{botToken}}"
+}
+
+### List registered bots and their status
+GET {{host}}/admin/bots
+Authorization: Bearer {{adminKey}}
+
+### Get one bot
+GET {{host}}/admin/bots/1
+Authorization: Bearer {{adminKey}}
+
+### Disable a bot (stops serving; keeps its data)
+POST {{host}}/admin/bots/1/disable
+Authorization: Bearer {{adminKey}}
+
+### Re-enable a bot
+POST {{host}}/admin/bots/1/enable
+Authorization: Bearer {{adminKey}}
+
+### Rotate a bot's token
+PUT {{host}}/admin/bots/1/token
+Authorization: Bearer {{adminKey}}
+Content-Type: application/json
+
+{
+  "token": "123456:new-token-from-botfather"
+}
+
+### Remove a bot
+DELETE {{host}}/admin/bots/1
+Authorization: Bearer {{adminKey}}
+
+### Upload a behavior extension (compiled plugin DLL) at runtime
+# Build samples/ReverseBehavior first, then point this at its DLL.
+POST {{host}}/admin/behaviors
+Authorization: Bearer {{adminKey}}
+Content-Type: multipart/form-data; boundary=----plugin
+
+------plugin
+Content-Disposition: form-data; name="package"; filename="ReverseBehavior.dll"
+Content-Type: application/octet-stream
+
+< ./../../samples/ReverseBehavior/bin/Release/net10.0/ReverseBehavior.dll
+------plugin--

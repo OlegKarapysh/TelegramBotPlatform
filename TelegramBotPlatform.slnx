@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="docker-compose.yml" />
+    <File Path="docker-compose.prod.yml" />
+    <File Path="README.md" />
+    <File Path="CLAUDE.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/TelegramBotPlatform.Public/TelegramBotPlatform.Public.csproj" />
+    <Project Path="src/TelegramBotPlatform.Application/TelegramBotPlatform.Application.csproj" />
+    <Project Path="src/TelegramBotPlatform.Infrastructure/TelegramBotPlatform.Infrastructure.csproj" />
+    <Project Path="src/TelegramBotPlatform.Persistence/TelegramBotPlatform.Persistence.csproj" />
+    <Project Path="src/TelegramBotPlatform.UnitTests/TelegramBotPlatform.UnitTests.csproj" />
+    <Project Path="src/TelegramBotPlatform.WebApi/TelegramBotPlatform.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/ReverseBehavior/ReverseBehavior.csproj" />
+  </Folder>
+</Solution>
