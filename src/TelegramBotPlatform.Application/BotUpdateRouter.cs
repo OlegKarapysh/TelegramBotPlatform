@@ -23,7 +23,7 @@ public sealed class BotUpdateRouter(
         // fleet grows.
         System.Diagnostics.Activity.Current?.SetTag("bot.id", botId);
 
-        var registration = await botRegistry.GetAsync(botId, cancellationToken);
+        var registration = await botRegistry.Get(botId, cancellationToken);
         if (registration is null)
         {
             logger.LogWarning("Received an update for unknown bot {BotId}; dropping it.", botId);
@@ -51,7 +51,7 @@ public sealed class BotUpdateRouter(
 
         try
         {
-            await behavior.HandleUpdateAsync(updateContext, cancellationToken);
+            await behavior.HandleUpdate(updateContext, cancellationToken);
             await healthTracker.RecordSuccess(botId, cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

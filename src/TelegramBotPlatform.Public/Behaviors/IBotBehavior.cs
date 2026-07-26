@@ -20,5 +20,5 @@ public interface IBotBehavior
     /// Handle one update for one bot. Should not throw for expected failures; any throw is caught and
     /// contained by the platform but marks the bot's health.
     /// </summary>
-    Task HandleUpdateAsync(IBotUpdateContext context, CancellationToken cancellationToken);
+    Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken);
 }

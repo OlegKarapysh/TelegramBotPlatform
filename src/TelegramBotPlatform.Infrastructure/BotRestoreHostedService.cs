@@ -15,13 +15,13 @@ public sealed class BotRestoreHostedService(
         var tokenProtector = scope.ServiceProvider.GetRequiredService<ITokenProtector>();
         var supervisor = scope.ServiceProvider.GetRequiredService<BotSupervisor>();
 
-        var bots = await botRegistry.ListAsync(cancellationToken);
+        var bots = await botRegistry.List(cancellationToken);
 
         foreach (var bot in bots.Where(b => b.Status != BotStatus.Disabled))
         {
             try
             {
-                var encryptedToken = await botRegistry.GetEncryptedTokenAsync(bot.Id, cancellationToken);
+                var encryptedToken = await botRegistry.GetEncryptedToken(bot.Id, cancellationToken);
                 if (encryptedToken is null)
                 {
                     logger.LogError("Bot {BotId} has no stored token; skipping restore.", bot.Id);
@@ -29,7 +29,7 @@ public sealed class BotRestoreHostedService(
                 }
 
                 var token = tokenProtector.Unprotect(encryptedToken);
-                await supervisor.StartAsync(bot.Id, token, cancellationToken);
+                await supervisor.Start(bot.Id, token, cancellationToken);
             }
             catch (Exception exception)
             {

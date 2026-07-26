@@ -20,7 +20,7 @@ public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealth
             return;
         }
 
-        var registration = await botRegistry.GetAsync(botId, cancellationToken);
+        var registration = await botRegistry.Get(botId, cancellationToken);
         if (registration is null || registration.Status == BotStatus.Disabled)
         {
             return;
@@ -28,7 +28,7 @@ public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealth
 
         if (registration.Status != BotStatus.Failing)
         {
-            await botRegistry.UpdateStatusAsync(botId, BotStatus.Failing, cancellationToken);
+            await botRegistry.UpdateStatus(botId, BotStatus.Failing, cancellationToken);
             logger.LogWarning("Bot {BotId} marked Failing after {Failures} consecutive errors.", botId, failures);
         }
     }
@@ -41,10 +41,10 @@ public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealth
             return;
         }
 
-        var registration = await botRegistry.GetAsync(botId, cancellationToken);
+        var registration = await botRegistry.Get(botId, cancellationToken);
         if (registration is { Status: BotStatus.Failing })
         {
-            await botRegistry.UpdateStatusAsync(botId, BotStatus.Active, cancellationToken);
+            await botRegistry.UpdateStatus(botId, BotStatus.Active, cancellationToken);
             logger.LogInformation("Bot {BotId} recovered; status reset to Active.", botId);
         }
     }

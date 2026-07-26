@@ -19,7 +19,7 @@ public class BotHealthTrackerTests
             await tracker.RecordFailure(1, TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(BotStatus.Active, (await registry.GetAsync(1, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Active, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public class BotHealthTrackerTests
             await tracker.RecordFailure(1, TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(BotStatus.Failing, (await registry.GetAsync(1, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Failing, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class BotHealthTrackerTests
             await tracker.RecordFailure(1, TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(BotStatus.Disabled, (await registry.GetAsync(1, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Disabled, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
     }
 
     [Fact]
@@ -63,11 +63,11 @@ public class BotHealthTrackerTests
             await tracker.RecordFailure(1, TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(BotStatus.Failing, (await registry.GetAsync(1, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Failing, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
 
         await tracker.RecordSuccess(1, TestContext.Current.CancellationToken);
 
-        Assert.Equal(BotStatus.Active, (await registry.GetAsync(1, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Active, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
     }
 
     [Fact]
@@ -95,8 +95,8 @@ public class BotHealthTrackerTests
             await tracker.RecordFailure(1, TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal(BotStatus.Failing, (await registry.GetAsync(1, TestContext.Current.CancellationToken))!.Status);
-        Assert.Equal(BotStatus.Active, (await registry.GetAsync(2, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Failing, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
+        Assert.Equal(BotStatus.Active, (await registry.Get(2, TestContext.Current.CancellationToken))!.Status);
     }
 
     private static BotRegistration Registration(long id, BotStatus status) =>
@@ -110,19 +110,19 @@ public class BotHealthTrackerTests
 
         public void Seed(BotRegistration registration) => _bots[registration.Id] = registration;
 
-        public Task<Result<BotRegistration>> AddAsync(long telegramBotId, string? username, string label, string behaviorKey, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
+        public Task<Result<BotRegistration>> Add(long telegramBotId, string? username, string label, string behaviorKey, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<BotRegistration?> GetAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<BotRegistration?> Get(long botId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_bots.GetValueOrDefault(botId));
 
-        public Task<byte[]?> GetEncryptedTokenAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<byte[]?> GetEncryptedToken(long botId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<IReadOnlyList<BotRegistration>> ListAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<BotRegistration>> List(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Result> UpdateStatusAsync(long botId, BotStatus status, CancellationToken cancellationToken = default)
+        public Task<Result> UpdateStatus(long botId, BotStatus status, CancellationToken cancellationToken = default)
         {
             UpdateStatusCallCount++;
             if (_bots.TryGetValue(botId, out var registration))
@@ -133,10 +133,10 @@ public class BotHealthTrackerTests
             return Task.FromResult(Result.Ok());
         }
 
-        public Task<Result> UpdateTokenAsync(long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
+        public Task<Result> UpdateToken(long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Result> RemoveAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<Result> Remove(long botId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 }

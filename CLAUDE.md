@@ -103,6 +103,7 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
   Nullable reference types are on solution-wide — keep code null-clean. See [.editorconfig](.editorconfig).
 - **Central Package Management**: every NuGet version lives in [Directory.Packages.props](Directory.Packages.props);
   `.csproj` files reference packages **without** a `Version`.
+- **No Async suffix** in async methods.
 
 ### Adding a built-in behavior
 1. Implement `IBotBehavior` (in the host under `WebApi/Behaviors/`, or a new library the host references).

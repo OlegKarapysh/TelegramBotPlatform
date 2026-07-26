@@ -44,9 +44,9 @@ public sealed class BehaviorCatalog : IBehaviorCatalog
 
     /// <summary>Only the major version must match — minor/patch bumps to the SDK contract stay compatible.</summary>
     private static bool IsCompatibleContractVersion(string contractVersion) =>
-        MajorVersion(contractVersion) == MajorVersion(BehaviorContractVersion.Current);
+        GetMajorVersion(contractVersion) == GetMajorVersion(BehaviorContractVersion.Current);
 
-    private static int MajorVersion(string version)
+    private static int GetMajorVersion(string version)
     {
         var separatorIndex = version.IndexOf('.');
         var majorPart = separatorIndex < 0 ? version : version[..separatorIndex];

@@ -30,7 +30,7 @@ public sealed class BotRegistrationService(
         var (telegramBotId, username) = validation.Value;
         var encryptedToken = tokenProtector.Protect(token);
 
-        var addResult = await botRegistry.AddAsync(telegramBotId, username, label, behaviorKey, encryptedToken, cancellationToken);
+        var addResult = await botRegistry.Add(telegramBotId, username, label, behaviorKey, encryptedToken, cancellationToken);
         if (addResult.IsFailed)
         {
             return addResult;
@@ -38,47 +38,47 @@ public sealed class BotRegistrationService(
 
         var registration = addResult.Value;
         System.Diagnostics.Activity.Current?.SetTag("bot.id", registration.Id);
-        await botLifecycle.StartAsync(registration.Id, token, cancellationToken);
+        await botLifecycle.Start(registration.Id, token, cancellationToken);
 
         return registration;
     }
 
     public Task<IReadOnlyList<BotRegistration>> List(CancellationToken cancellationToken = default) =>
-        botRegistry.ListAsync(cancellationToken);
+        botRegistry.List(cancellationToken);
 
     public Task<BotRegistration?> Get(long botId, CancellationToken cancellationToken = default) =>
-        botRegistry.GetAsync(botId, cancellationToken);
+        botRegistry.Get(botId, cancellationToken);
 
     public async Task<Result> Disable(long botId, CancellationToken cancellationToken = default)
     {
         System.Diagnostics.Activity.Current?.SetTag("bot.id", botId);
-        var updateResult = await botRegistry.UpdateStatusAsync(botId, BotStatus.Disabled, cancellationToken);
+        var updateResult = await botRegistry.UpdateStatus(botId, BotStatus.Disabled, cancellationToken);
         if (updateResult.IsFailed)
         {
             return updateResult;
         }
 
-        await botLifecycle.StopAsync(botId, cancellationToken);
+        await botLifecycle.Stop(botId, cancellationToken);
         return Result.Ok();
     }
 
     public async Task<Result> Enable(long botId, CancellationToken cancellationToken = default)
     {
         System.Diagnostics.Activity.Current?.SetTag("bot.id", botId);
-        var encryptedToken = await botRegistry.GetEncryptedTokenAsync(botId, cancellationToken);
+        var encryptedToken = await botRegistry.GetEncryptedToken(botId, cancellationToken);
         if (encryptedToken is null)
         {
             return new Error($"Bot {botId} was not found.");
         }
 
-        var updateResult = await botRegistry.UpdateStatusAsync(botId, BotStatus.Active, cancellationToken);
+        var updateResult = await botRegistry.UpdateStatus(botId, BotStatus.Active, cancellationToken);
         if (updateResult.IsFailed)
         {
             return updateResult;
         }
 
         var token = tokenProtector.Unprotect(encryptedToken);
-        await botLifecycle.StartAsync(botId, token, cancellationToken);
+        await botLifecycle.Start(botId, token, cancellationToken);
 
         return Result.Ok();
     }
@@ -86,7 +86,7 @@ public sealed class BotRegistrationService(
     public async Task<Result> RotateToken(long botId, string newToken, CancellationToken cancellationToken = default)
     {
         System.Diagnostics.Activity.Current?.SetTag("bot.id", botId);
-        var registration = await botRegistry.GetAsync(botId, cancellationToken);
+        var registration = await botRegistry.Get(botId, cancellationToken);
         if (registration is null)
         {
             return new Error($"Bot {botId} was not found.");
@@ -101,26 +101,26 @@ public sealed class BotRegistrationService(
         var (telegramBotId, _) = validation.Value;
         var encryptedToken = tokenProtector.Protect(newToken);
 
-        var updateResult = await botRegistry.UpdateTokenAsync(botId, telegramBotId, encryptedToken, cancellationToken);
+        var updateResult = await botRegistry.UpdateToken(botId, telegramBotId, encryptedToken, cancellationToken);
         if (updateResult.IsFailed)
         {
             return updateResult;
         }
 
-        await botLifecycle.StartAsync(botId, newToken, cancellationToken);
+        await botLifecycle.Start(botId, newToken, cancellationToken);
         return Result.Ok();
     }
 
     public async Task<Result> Remove(long botId, CancellationToken cancellationToken = default)
     {
         System.Diagnostics.Activity.Current?.SetTag("bot.id", botId);
-        var removeResult = await botRegistry.RemoveAsync(botId, cancellationToken);
+        var removeResult = await botRegistry.Remove(botId, cancellationToken);
         if (removeResult.IsFailed)
         {
             return removeResult;
         }
 
-        await botLifecycle.RemoveAsync(botId, cancellationToken);
+        await botLifecycle.Remove(botId, cancellationToken);
         return Result.Ok();
     }
 }

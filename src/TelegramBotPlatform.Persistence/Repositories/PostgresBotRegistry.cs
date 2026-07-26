@@ -2,7 +2,7 @@ namespace TelegramBotPlatform.Persistence.Repositories;
 
 public sealed class PostgresBotRegistry(PlatformDbContext dbContext) : IBotRegistry
 {
-    public async Task<Result<BotRegistration>> AddAsync(
+    public async Task<Result<BotRegistration>> Add(
         long telegramBotId,
         string? username,
         string label,
@@ -45,7 +45,7 @@ public sealed class PostgresBotRegistry(PlatformDbContext dbContext) : IBotRegis
         return ToDto(entity);
     }
 
-    public async Task<BotRegistration?> GetAsync(long botId, CancellationToken cancellationToken = default)
+    public async Task<BotRegistration?> Get(long botId, CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.Bots
             .AsNoTracking()
@@ -54,14 +54,14 @@ public sealed class PostgresBotRegistry(PlatformDbContext dbContext) : IBotRegis
         return entity is null ? null : ToDto(entity);
     }
 
-    public Task<byte[]?> GetEncryptedTokenAsync(long botId, CancellationToken cancellationToken = default) =>
+    public Task<byte[]?> GetEncryptedToken(long botId, CancellationToken cancellationToken = default) =>
         dbContext.Bots
             .AsNoTracking()
             .Where(b => b.Id == botId)
             .Select(b => b.EncryptedToken)
             .SingleOrDefaultAsync(cancellationToken)!;
 
-    public async Task<IReadOnlyList<BotRegistration>> ListAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BotRegistration>> List(CancellationToken cancellationToken = default)
     {
         var entities = await dbContext.Bots
             .AsNoTracking()
@@ -71,7 +71,7 @@ public sealed class PostgresBotRegistry(PlatformDbContext dbContext) : IBotRegis
         return entities.Select(ToDto).ToArray();
     }
 
-    public async Task<Result> UpdateStatusAsync(long botId, BotStatus status, CancellationToken cancellationToken = default)
+    public async Task<Result> UpdateStatus(long botId, BotStatus status, CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.Bots.FindAsync([botId], cancellationToken);
         if (entity is null)
@@ -86,7 +86,7 @@ public sealed class PostgresBotRegistry(PlatformDbContext dbContext) : IBotRegis
         return Result.Ok();
     }
 
-    public async Task<Result> UpdateTokenAsync(
+    public async Task<Result> UpdateToken(
         long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.Bots.FindAsync([botId], cancellationToken);
@@ -107,7 +107,7 @@ public sealed class PostgresBotRegistry(PlatformDbContext dbContext) : IBotRegis
         return Result.Ok();
     }
 
-    public async Task<Result> RemoveAsync(long botId, CancellationToken cancellationToken = default)
+    public async Task<Result> Remove(long botId, CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.Bots.FindAsync([botId], cancellationToken);
         if (entity is null)

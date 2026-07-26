@@ -155,7 +155,7 @@ public class BotRegistrationServiceTests
         private long _nextId = 1;
         private readonly Dictionary<long, (BotRegistration Registration, byte[] Token)> _bots = new();
 
-        public Task<Result<BotRegistration>> AddAsync(long telegramBotId, string? username, string label, string behaviorKey, byte[] encryptedToken, CancellationToken cancellationToken = default)
+        public Task<Result<BotRegistration>> Add(long telegramBotId, string? username, string label, string behaviorKey, byte[] encryptedToken, CancellationToken cancellationToken = default)
         {
             if (_bots.Values.Any(b => b.Registration.TelegramBotId == telegramBotId))
             {
@@ -167,16 +167,16 @@ public class BotRegistrationServiceTests
             return Task.FromResult(Result.Ok(registration));
         }
 
-        public Task<BotRegistration?> GetAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<BotRegistration?> Get(long botId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_bots.TryGetValue(botId, out var entry) ? entry.Registration : null);
 
-        public Task<byte[]?> GetEncryptedTokenAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<byte[]?> GetEncryptedToken(long botId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_bots.TryGetValue(botId, out var entry) ? entry.Token : null);
 
-        public Task<IReadOnlyList<BotRegistration>> ListAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<BotRegistration>> List(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<BotRegistration>>(_bots.Values.Select(b => b.Registration).ToArray());
 
-        public Task<Result> UpdateStatusAsync(long botId, BotStatus status, CancellationToken cancellationToken = default)
+        public Task<Result> UpdateStatus(long botId, BotStatus status, CancellationToken cancellationToken = default)
         {
             if (!_bots.TryGetValue(botId, out var entry))
             {
@@ -187,7 +187,7 @@ public class BotRegistrationServiceTests
             return Task.FromResult(Result.Ok());
         }
 
-        public Task<Result> UpdateTokenAsync(long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default)
+        public Task<Result> UpdateToken(long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default)
         {
             if (!_bots.TryGetValue(botId, out var entry))
             {
@@ -203,7 +203,7 @@ public class BotRegistrationServiceTests
             return Task.FromResult(Result.Ok());
         }
 
-        public Task<Result> RemoveAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<Result> Remove(long botId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_bots.Remove(botId) ? Result.Ok() : Result.Fail($"Bot {botId} was not found."));
     }
 
@@ -240,19 +240,19 @@ public class BotRegistrationServiceTests
         public List<long> Stopped { get; } = [];
         public List<long> Removed { get; } = [];
 
-        public Task StartAsync(long botId, string token, CancellationToken cancellationToken = default)
+        public Task Start(long botId, string token, CancellationToken cancellationToken = default)
         {
             Started.Add((botId, token));
             return Task.CompletedTask;
         }
 
-        public Task StopAsync(long botId, CancellationToken cancellationToken = default)
+        public Task Stop(long botId, CancellationToken cancellationToken = default)
         {
             Stopped.Add(botId);
             return Task.CompletedTask;
         }
 
-        public Task RemoveAsync(long botId, CancellationToken cancellationToken = default)
+        public Task Remove(long botId, CancellationToken cancellationToken = default)
         {
             Removed.Add(botId);
             return Task.CompletedTask;

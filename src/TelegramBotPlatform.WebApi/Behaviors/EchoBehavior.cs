@@ -17,7 +17,7 @@ public sealed class EchoBehavior : IBotBehavior
 
     public string ContractVersion => BehaviorContractVersion.Current;
 
-    public async Task HandleUpdateAsync(IBotUpdateContext context, CancellationToken cancellationToken)
+    public async Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken)
     {
         var message = context.Update.Message;
         if (message?.Text is not { } text)

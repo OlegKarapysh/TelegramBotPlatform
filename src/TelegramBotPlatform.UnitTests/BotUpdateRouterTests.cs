@@ -112,25 +112,25 @@ public class BotUpdateRouterTests
 
         public void Seed(BotRegistration registration) => _bots[registration.Id] = registration;
 
-        public Task<Result<BotRegistration>> AddAsync(long telegramBotId, string? username, string label, string behaviorKey, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
+        public Task<Result<BotRegistration>> Add(long telegramBotId, string? username, string label, string behaviorKey, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<BotRegistration?> GetAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<BotRegistration?> Get(long botId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_bots.GetValueOrDefault(botId));
 
-        public Task<byte[]?> GetEncryptedTokenAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<byte[]?> GetEncryptedToken(long botId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<IReadOnlyList<BotRegistration>> ListAsync(CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<BotRegistration>> List(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Result> UpdateStatusAsync(long botId, BotStatus status, CancellationToken cancellationToken = default) =>
+        public Task<Result> UpdateStatus(long botId, BotStatus status, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Result> UpdateTokenAsync(long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
+        public Task<Result> UpdateToken(long botId, long telegramBotId, byte[] encryptedToken, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Result> RemoveAsync(long botId, CancellationToken cancellationToken = default) =>
+        public Task<Result> Remove(long botId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 
@@ -163,7 +163,7 @@ public class BotUpdateRouterTests
         public string DisplayName => "Recording";
         public string ContractVersion => BehaviorContractVersion.Current;
 
-        public Task HandleUpdateAsync(IBotUpdateContext context, CancellationToken cancellationToken)
+        public Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken)
         {
             CallCount++;
             LastContext = context;
@@ -177,7 +177,7 @@ public class BotUpdateRouterTests
         public string DisplayName => "Throwing";
         public string ContractVersion => BehaviorContractVersion.Current;
 
-        public Task HandleUpdateAsync(IBotUpdateContext context, CancellationToken cancellationToken) =>
+        public Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("boom");
     }
 }

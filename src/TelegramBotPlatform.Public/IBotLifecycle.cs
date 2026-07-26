@@ -7,7 +7,7 @@ namespace TelegramBotPlatform.Public;
 /// </summary>
 public interface IBotLifecycle
 {
-    Task StartAsync(long botId, string token, CancellationToken cancellationToken = default);
-    Task StopAsync(long botId, CancellationToken cancellationToken = default);
-    Task RemoveAsync(long botId, CancellationToken cancellationToken = default);
+    Task Start(long botId, string token, CancellationToken cancellationToken = default);
+    Task Stop(long botId, CancellationToken cancellationToken = default);
+    Task Remove(long botId, CancellationToken cancellationToken = default);
 }

@@ -16,7 +16,7 @@ public sealed class BotSupervisor(
     private readonly ConcurrentDictionary<long, RunningBot> _runningBots = new();
 
     /// <summary>Starts (or restarts, e.g. after a token rotation) the receiver for <paramref name="botId"/>.</summary>
-    public async Task StartAsync(long botId, string token, CancellationToken cancellationToken)
+    public async Task Start(long botId, string token, CancellationToken cancellationToken)
     {
         botClientRegistry.Set(botId, token);
         var client = botClientRegistry.Get(botId);
@@ -48,7 +48,7 @@ public sealed class BotSupervisor(
     }
 
     /// <summary>Stops serving <paramref name="botId"/> without forgetting its client (used by disable).</summary>
-    public async Task StopAsync(long botId, CancellationToken cancellationToken)
+    public async Task Stop(long botId, CancellationToken cancellationToken)
     {
         if (_runningBots.TryGetValue(botId, out var running) && running.IsWebhook
             && botClientRegistry.TryGet(botId, out var client) && client is not null)
@@ -68,9 +68,9 @@ public sealed class BotSupervisor(
     }
 
     /// <summary>Stops the bot and forgets its client entirely (used by remove).</summary>
-    public async Task RemoveAsync(long botId, CancellationToken cancellationToken)
+    public async Task Remove(long botId, CancellationToken cancellationToken)
     {
-        await StopAsync(botId, cancellationToken);
+        await Stop(botId, cancellationToken);
         botClientRegistry.Remove(botId);
     }
 

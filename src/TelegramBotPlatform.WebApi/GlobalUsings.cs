@@ -9,3 +9,4 @@ global using TelegramBotPlatform.Infrastructure.Plugins;
 global using TelegramBotPlatform.Public.Behaviors;
 global using TelegramBotPlatform.WebApi;
 global using TelegramBotPlatform.WebApi.Behaviors;
+global using TelegramBotPlatform.WebApi.Extensions;

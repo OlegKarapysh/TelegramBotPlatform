@@ -86,13 +86,13 @@ public static class ServiceInstaller
 
             // A missing or Disabled bot must not process updates — Telegram may still retry a webhook for a
             // bot that was just disabled (its webhook is deleted, but retries are already in flight).
-            var registration = await botRegistry.GetAsync(botId, cancellationToken);
+            var registration = await botRegistry.Get(botId, cancellationToken);
             if (registration is null || registration.Status == BotStatus.Disabled)
             {
                 return Results.NotFound();
             }
 
-            await receiver.HandleAsync(botId, update, cancellationToken);
+            await receiver.Handle(botId, update, cancellationToken);
             return Results.Ok();
         });
 

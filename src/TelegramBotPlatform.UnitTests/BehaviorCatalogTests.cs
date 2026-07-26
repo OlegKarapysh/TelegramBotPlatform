@@ -10,7 +10,7 @@ public class BehaviorCatalogTests
         public string Key { get; } = key;
         public string DisplayName => $"Fake:{Key}";
         public string ContractVersion { get; } = contractVersion;
-        public Task HandleUpdateAsync(IBotUpdateContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     [Fact]

@@ -6,7 +6,7 @@ namespace TelegramBotPlatform.Infrastructure.Security;
 /// </summary>
 public sealed class AdminApiKeyAuth(IOptions<PlatformOptions> platformOptions) : IEndpointFilter
 {
-    private const string BearerPrefix = "Bearer ";
+    private const string _bearerPrefix = "Bearer ";
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -28,8 +28,8 @@ public sealed class AdminApiKeyAuth(IOptions<PlatformOptions> platformOptions) :
         }
 
         var authorization = request.Headers.Authorization.ToString();
-        return authorization.StartsWith(BearerPrefix, StringComparison.OrdinalIgnoreCase)
-            ? authorization[BearerPrefix.Length..].Trim()
+        return authorization.StartsWith(_bearerPrefix, StringComparison.OrdinalIgnoreCase)
+            ? authorization[_bearerPrefix.Length..].Trim()
             : null;
     }
 

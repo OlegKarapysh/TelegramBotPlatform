@@ -2,7 +2,7 @@ namespace TelegramBotPlatform.Public.Bots;
 
 /// <summary>
 /// A hosted bot's durable, non-secret record. Never carries the bot token — see
-/// <see cref="IBotRegistry.GetEncryptedTokenAsync"/> for the (still encrypted) token, used only
+/// <see cref="IBotRegistry.GetEncryptedToken"/> for the (still encrypted) token, used only
 /// internally to build the bot's Telegram client.
 /// </summary>
 public sealed record BotRegistration(
