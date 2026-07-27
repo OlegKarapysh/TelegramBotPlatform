@@ -41,3 +41,21 @@ src/TelegramBotPlatform.WebApi/plugins/
 
 # MSBuild Binary and Structured Log
 *.binlog
+
+# Spec Kit (speckit) framework skills and files
+.claude/skills/speckit-*/
+.specify/*
+specs/
+
+# Terraform (infra/terraform) — never commit state or secret var files; DO commit the lock file
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

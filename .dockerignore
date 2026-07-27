@@ -24,3 +24,13 @@
 **/values.dev.yaml
 LICENSE
 README.md
+
+# Infra / IaC and repo docs — not part of the app image build context
+infra/
+specs/
+.specify/
+.github/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
