@@ -20,7 +20,7 @@ public static class WebApplicationExtensions
             var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("BehaviorStartup");
 
             var echoBehavior = scope.ServiceProvider.GetRequiredService<EchoBehavior>();
-            var builtInResult = behaviorCatalog.Register(echoBehavior, "built-in");
+            var builtInResult = behaviorCatalog.Register(echoBehavior, BehaviorSource.BuiltIn);
             if (builtInResult.IsFailed)
             {
                 throw new InvalidOperationException(
@@ -42,7 +42,7 @@ public static class WebApplicationExtensions
 
                 foreach (var behavior in loadResult.Value)
                 {
-                    var registerResult = behaviorCatalog.Register(behavior, $"extension:{Path.GetFileName(assemblyPath)}");
+                    var registerResult = behaviorCatalog.Register(behavior, BehaviorSource.Extension(Path.GetFileName(assemblyPath)));
                     if (registerResult.IsFailed)
                     {
                         startupLogger.LogError(

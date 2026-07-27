@@ -17,8 +17,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish .
 
-# The effective listen port is set at runtime via ASPNETCORE_URLS in docker-compose.prod.yml.
+# Migrate-then-serve entrypoint. It runs an explicit command as-is (so docker-compose's `migrate`
+# service still works) and, when given no command, applies EF migrations before starting the app —
+# required on ECS Express Mode, which allows only one container (no init/sidecar).
+COPY src/TelegramBotPlatform.WebApi/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# The effective listen port is set at runtime via ASPNETCORE_URLS.
 # EXPOSE is informational only.
 ARG APP_PORT=8080
 EXPOSE ${APP_PORT}
-ENTRYPOINT ["dotnet", "TelegramBotPlatform.WebApi.dll"]
+ENTRYPOINT ["/app/entrypoint.sh"]

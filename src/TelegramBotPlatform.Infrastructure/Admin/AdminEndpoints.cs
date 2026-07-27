@@ -99,7 +99,7 @@ public static class AdminEndpoints
         var loaded = new List<string>();
         foreach (var behavior in loadResult.Value)
         {
-            var registerResult = catalog.Register(behavior, $"extension:{package.FileName}");
+            var registerResult = catalog.Register(behavior, BehaviorSource.Extension(package.FileName));
             if (registerResult.IsFailed)
             {
                 pluginStore.Delete(assemblyPath);

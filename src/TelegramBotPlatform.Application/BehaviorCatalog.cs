@@ -8,7 +8,7 @@ namespace TelegramBotPlatform.Application;
 /// </summary>
 public sealed class BehaviorCatalog : IBehaviorCatalog
 {
-    private readonly ConcurrentDictionary<string, (IBotBehavior Behavior, string Source)> _behaviorsByKey = new();
+    private readonly ConcurrentDictionary<string, RegisteredBehavior> _behaviorsByKey = new();
 
     public bool TryGet(string key, out IBotBehavior? behavior)
     {
@@ -37,7 +37,7 @@ public sealed class BehaviorCatalog : IBehaviorCatalog
                 + $"incompatible with the platform's current contract version {BehaviorContractVersion.Current}.");
         }
 
-        return _behaviorsByKey.TryAdd(behavior.Key, (behavior, source))
+        return _behaviorsByKey.TryAdd(behavior.Key, new RegisteredBehavior(behavior, source))
             ? Result.Ok()
             : new Error($"A behavior with key \"{behavior.Key}\" is already registered.");
     }
@@ -52,4 +52,6 @@ public sealed class BehaviorCatalog : IBehaviorCatalog
         var majorPart = separatorIndex < 0 ? version : version[..separatorIndex];
         return int.TryParse(majorPart, out var major) ? major : -1;
     }
+
+    private sealed record RegisteredBehavior(IBotBehavior Behavior, string Source);
 }

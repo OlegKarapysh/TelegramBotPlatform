@@ -1,0 +1,65 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer commit's deploy supersedes an older in-flight one (FR-015).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+permissions:
+  id-token: write # OIDC — no long-lived AWS keys (FR-011)
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore TelegramBotPlatform.slnx
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build TelegramBotPlatform.slnx -c Release --no-restore
+      - name: Test
+        run: dotnet test --solution TelegramBotPlatform.slnx
+
+  build-and-push:
+    needs: test # tests gate the deploy (FR-014)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Log in to ECR
+        run: aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.ECR_REPOSITORY_URL }}"
+      - name: Build and push image (tagged with the commit SHA)
+        run: |
+          docker build -f src/TelegramBotPlatform.WebApi/Dockerfile \
+            -t "${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}" .
+          docker push "${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Roll out the new image to the Express service
+        run: |
+          # TODO(verify): replace with the exact AWS CLI command to update an ECS Express gateway
+          # service's image to ${{ github.sha }}. Express Mode performs a health-gated canary rollout
+          # with automatic rollback (FR-008). The service is: ${{ vars.EXPRESS_SERVICE_ARN }}
+          echo "Deploy ${{ vars.EXPRESS_SERVICE_ARN }} -> image tag ${{ github.sha }}"
+          exit 1 # remove once the real update command is in place

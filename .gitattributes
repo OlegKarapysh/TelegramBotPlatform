@@ -1,0 +1,2 @@
+# Shell scripts must use LF so the container shebang works regardless of host OS.
+*.sh text eol=lf
