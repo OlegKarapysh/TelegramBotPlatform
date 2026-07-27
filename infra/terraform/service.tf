@@ -10,6 +10,13 @@ resource "aws_ecs_express_gateway_service" "app" {
   memory            = var.memory
   health_check_path = "/health"
 
+  # Pin the tasks to the default VPC + the app security group so RDS can allow exactly this source
+  # (feature 002-rds-postgres, FR-006). network_configuration is a list(object) nested attribute.
+  network_configuration = [{
+    subnets         = data.aws_subnets.default.ids
+    security_groups = [aws_security_group.app.id]
+  }]
+
   primary_container {
     image          = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
     container_port = 8080
@@ -36,6 +43,16 @@ resource "aws_ecs_express_gateway_service" "app" {
     environment {
       name  = "Platform__WebhookBaseUrl"
       value = var.webhook_base_url
+    }
+    # Redeploy trigger (feature 002-rds-postgres, FR-008): secrets are read at task launch and not
+    # hot-reloaded, and changing the secret's VALUE does not change this service resource. Tying an env
+    # var to a hash of the connection string forces a health-gated rollout whenever the string changes
+    # (first wiring + every password rotation). The value is a one-way hash, not the secret itself, so
+    # it is safe in the task definition. The app ignores this unknown Persistence:* key. Kept LAST in
+    # the env list so Terraform shows a clean single-add rather than a positional rename.
+    environment {
+      name  = "Persistence__ConnectionRevision"
+      value = substr(sha256(local.db_connection_string), 0, 16)
     }
 
     secret {
