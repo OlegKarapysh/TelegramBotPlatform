@@ -13,6 +13,17 @@ output "log_group_name" {
   description = "CloudWatch log group holding application logs."
 }
 
+# --- Managed database (feature 002-rds-postgres). The connection string / password are NEVER output. ---
+output "db_endpoint" {
+  value       = aws_db_instance.postgres.address
+  description = "RDS PostgreSQL endpoint host (no credentials)."
+}
+
+output "db_instance_id" {
+  value       = aws_db_instance.postgres.identifier
+  description = "RDS instance identifier."
+}
+
 # The nested shape of `ingress_paths` is not documented for this new resource. Output the raw value
 # so you can inspect it (e.g. `terraform state show aws_ecs_express_gateway_service.app`).
 output "ingress_paths" {

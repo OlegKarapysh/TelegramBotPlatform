@@ -9,5 +9,10 @@ terraform {
       # Pin to the current provider major in your environment; it MUST include Express Mode support.
       version = ">= 5.80"
     }
+    # Generates the RDS master password (feature 002-rds-postgres).
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
