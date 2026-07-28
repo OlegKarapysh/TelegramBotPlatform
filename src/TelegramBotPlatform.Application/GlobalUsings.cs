@@ -1,7 +1,8 @@
 global using System.Collections.Concurrent;
+global using System.Collections.Frozen;
+global using System.Diagnostics;
 global using FluentResults;
 global using MassTransit;
-global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Telegram.Bot;
 global using Telegram.Bot.Types;

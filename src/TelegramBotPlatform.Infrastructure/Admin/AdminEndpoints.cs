@@ -19,6 +19,8 @@ public static class AdminEndpoints
         // UseAntiforgery middleware + a token. This is an operator-only, API-key-authenticated machine
         // endpoint (no cookies/browser), so anti-forgery adds nothing — opt out of it.
         group.MapPost("/behaviors", UploadBehaviorExtension).DisableAntiforgery();
+        group.MapPut("/behaviors/{packageName}", ReplaceBehaviorExtension).DisableAntiforgery();
+        group.MapDelete("/behaviors/{packageName}", RemoveBehaviorExtension);
     }
 
     private static async Task<IResult> RegisterBot(RegisterBotRequest request, BotRegistrationService service, CancellationToken cancellationToken)
@@ -65,57 +67,102 @@ public static class AdminEndpoints
         return result.IsFailed ? MapFailure(result.Errors) : Results.NoContent();
     }
 
-    private static IResult ListBehaviors(IBehaviorCatalog catalog) => Results.Ok(catalog.List());
+    /// <summary>
+    /// The assignable behaviors, plus every package held in the extension store — including any that
+    /// failed to load, so an operator can see why a behavior is missing and repair it by name.
+    /// </summary>
+    private static IResult ListBehaviors(IBehaviorCatalog catalog, BehaviorExtensionService extensions) =>
+        Results.Ok(new { behaviors = catalog.List(), packages = extensions.Packages });
 
     /// <summary>
     /// Uploads a compiled behavior-extension assembly, loads it, and registers every <see cref="IBotBehavior"/>
-    /// it contains. A bad extension is rejected without affecting the running platform or any bot.
+    /// it contains. Create-only: a name already in the store is a conflict, so an accidental re-upload can
+    /// never silently supersede a working extension — use <c>PUT</c> for that. A bad extension is rejected
+    /// without affecting the running platform or any bot.
     /// </summary>
     private static async Task<IResult> UploadBehaviorExtension(
-        IFormFile package, PluginStore pluginStore, ExtensionAssemblyLoader loader, IBehaviorCatalog catalog, CancellationToken cancellationToken)
+        IFormFile package,
+        BehaviorExtensionService extensions,
+        IOptions<PlatformOptions> platformOptions,
+        CancellationToken cancellationToken)
     {
-        // Reject a name that collides with an already-persisted extension before writing anything, so an
-        // upload can never overwrite a working plugin's assembly on disk.
-        if (pluginStore.Exists(package.FileName))
+        if (RejectIfTooLarge(package, platformOptions.Value) is { } tooLarge)
         {
-            return Results.Conflict(new { error = $"A behavior extension named \"{Path.GetFileName(package.FileName)}\" is already loaded." });
+            return tooLarge;
         }
 
-        string assemblyPath;
-        await using (var stream = package.OpenReadStream())
+        await using var stream = package.OpenReadStream();
+        var result = await extensions.Upload(package.FileName, stream, cancellationToken);
+
+        return result.IsFailed
+            ? MapFailure(result.Errors)
+            : Results.Created("/admin/behaviors", new { loaded = result.Value, assembly = Path.GetFileName(package.FileName) });
+    }
+
+    /// <summary>
+    /// Replaces a stored extension with a new build, hot-swapping its behaviors for bots already running.
+    /// A replacement that fails to load, collides, or would take away a behavior a bot is still assigned to
+    /// changes nothing at all.
+    /// </summary>
+    private static async Task<IResult> ReplaceBehaviorExtension(
+        string packageName,
+        IFormFile package,
+        BehaviorExtensionService extensions,
+        IOptions<PlatformOptions> platformOptions,
+        CancellationToken cancellationToken)
+    {
+        if (RejectIfTooLarge(package, platformOptions.Value) is { } tooLarge)
         {
-            assemblyPath = await pluginStore.SaveAsync(package.FileName, stream, cancellationToken);
+            return tooLarge;
         }
 
-        // Any rejection past this point deletes the just-saved assembly, so a bad or colliding upload never
-        // lingers in the plugins directory to fail again on every subsequent startup reload.
-        var loadResult = loader.Load(assemblyPath);
-        if (loadResult.IsFailed)
+        await using var stream = package.OpenReadStream();
+        var result = await extensions.Replace(packageName, stream, cancellationToken);
+
+        return result.IsFailed
+            ? MapFailure(result.Errors)
+            : Results.Ok(new { loaded = result.Value, assembly = Path.GetFileName(packageName) });
+    }
+
+    /// <summary>Removes a stored extension. Refused while a registered bot is still assigned to one of its behaviors.</summary>
+    private static async Task<IResult> RemoveBehaviorExtension(
+        string packageName, BehaviorExtensionService extensions, CancellationToken cancellationToken)
+    {
+        var result = await extensions.Remove(packageName, cancellationToken);
+
+        return result.IsFailed ? MapFailure(result.Errors) : Results.NoContent();
+    }
+
+    /// <summary>
+    /// Rejects an oversized package on its declared length, before a single byte is buffered — an
+    /// unbounded upload would otherwise be a way to exhaust the platform's memory.
+    /// </summary>
+    private static IResult? RejectIfTooLarge(IFormFile package, PlatformOptions options)
+    {
+        if (package.Length <= options.MaxExtensionPackageBytes)
         {
-            pluginStore.Delete(assemblyPath);
-            return Results.BadRequest(new { error = loadResult.Errors.First().Message });
+            return null;
         }
 
-        var loaded = new List<string>();
-        foreach (var behavior in loadResult.Value)
-        {
-            var registerResult = catalog.Register(behavior, BehaviorSource.Extension(package.FileName));
-            if (registerResult.IsFailed)
-            {
-                pluginStore.Delete(assemblyPath);
-                return Results.Conflict(new { error = registerResult.Errors.First().Message, loaded });
-            }
+        var limitInMegabytes = options.MaxExtensionPackageBytes / (1024d * 1024d);
 
-            loaded.Add(behavior.Key);
-        }
-
-        return Results.Created("/admin/behaviors", new { loaded, assembly = package.FileName });
+        return Results.Json(
+            new { error = $"Package exceeds the {limitInMegabytes.ToString("0.#", CultureInfo.InvariantCulture)} MB limit." },
+            statusCode: StatusCodes.Status413PayloadTooLarge);
     }
 
     /// <summary>Maps a domain failure message to the closest HTTP status; never echoes back a token.</summary>
     private static IResult MapFailure(IReadOnlyList<IError> errors)
     {
-        var message = errors.Count > 0 ? errors[0].Message : "The request could not be completed.";
+        var error = errors.Count > 0 ? errors[0] : null;
+        var message = error?.Message ?? "The request could not be completed.";
+
+        // A store that cannot be reached is neither the caller's fault nor a missing resource — it is the
+        // platform being temporarily unable to serve, so it must not be reported as a 400.
+        if (message.Contains(BehaviorExtensionService.StoreUnreachableMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.Json(new { error = message }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
 
         if (message.Contains("already registered", StringComparison.OrdinalIgnoreCase)
             || message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
@@ -126,6 +173,12 @@ public static class AdminEndpoints
         if (message.Contains("was not found", StringComparison.OrdinalIgnoreCase))
         {
             return Results.NotFound(new { error = message });
+        }
+
+        // An in-use refusal carries the blocking bot ids as metadata so tooling need not parse the message.
+        if (error?.Metadata.TryGetValue("bots", out var bots) is true)
+        {
+            return Results.Conflict(new { error = message, bots });
         }
 
         return Results.BadRequest(new { error = message });

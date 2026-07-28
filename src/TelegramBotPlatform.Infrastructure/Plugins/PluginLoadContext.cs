@@ -1,4 +1,4 @@
-﻿namespace TelegramBotPlatform.Infrastructure.Plugins;
+namespace TelegramBotPlatform.Infrastructure.Plugins;
 
 /// <summary>
 /// Shares the platform SDK and Telegram.Bot assemblies from the host's default load context (so a

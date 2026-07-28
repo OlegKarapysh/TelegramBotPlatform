@@ -99,6 +99,30 @@ regenerated), which is the accepted trade-off (feature 002 spec, Q3).
   platform stores non-re-creatable data, set `backup_retention_period = 7`, `skip_final_snapshot =
   false`, and `deletion_protection = true` in `rds.tf`.
 
+## Behavior extension store (Amazon S3) — feature 003-s3-plugin-storage
+
+- **What Terraform manages** (`s3.tf`): a private bucket
+  `telegrambotplatform-behaviors-<account-id>` holding operator-uploaded behavior-extension packages,
+  with all four public-access blocks on, ACLs disabled (`BucketOwnerEnforced`), SSE-S3 encryption,
+  versioning **disabled**, and a bucket policy denying any non-TLS request. Access is granted by an
+  inline policy on the **task** role (`iam.tf`) — the first AWS permission the application itself uses.
+- **Why**: before this, uploaded extensions lived on the ECS task's ephemeral disk, so every deployment,
+  restart, or recovery silently lost them and any bot assigned to one went dark.
+- **Least privilege**: `GetObject`/`PutObject`/`DeleteObject` are scoped to `${behaviors_prefix}*`, and
+  `ListBucket` is constrained by an `s3:prefix` condition. That condition makes passing the prefix
+  **mandatory** in the application's list call — an unscoped listing is denied.
+- **Container wiring** (`service.tf`): `Platform__PluginsBucket`, `Platform__PluginsPrefix`, and an
+  explicit `AWS_REGION`. `Platform__PluginsDirectory` remains, but now only names the local *staging*
+  directory a downloaded package is written to so its private dependencies resolve alongside it.
+- **Startup is fail-fast**: if the bucket cannot be read within ~30s the app exits without binding a
+  port, so the health-gated canary rolls the release back. Note `wait_for_steady_state = false`, so
+  `terraform apply` still succeeds — the rollback, not the apply exit code, is the signal.
+- **Unset the bucket to opt out**: with `Platform__PluginsBucket` empty the app falls back to the local
+  directory (today's pre-003 behavior). That is also what makes local development and the test suite work
+  with no AWS credentials.
+- **Teardown**: `force_destroy = true`, so `terraform destroy` removes the bucket even with packages in
+  it — no manual emptying. Packages are re-uploadable from their source builds, so this is not data loss.
+
 ## Accepted limitations (per the 2026-07-26 clarifications)
 
 - **Uploaded plugins are ephemeral.** Express Mode has no persistent storage, so operator-uploaded

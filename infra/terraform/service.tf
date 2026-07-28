@@ -34,9 +34,25 @@ resource "aws_ecs_express_gateway_service" "app" {
       name  = "ASPNETCORE_URLS"
       value = "http://+:8080"
     }
+    # Not the store any more (feature 003-s3-plugin-storage): packages live in S3, and this is only the
+    # local staging directory they are written to so their private dependencies resolve alongside them.
     environment {
       name  = "Platform__PluginsDirectory"
       value = "plugins"
+    }
+    environment {
+      name  = "Platform__PluginsBucket"
+      value = aws_s3_bucket.behaviors.bucket
+    }
+    environment {
+      name  = "Platform__PluginsPrefix"
+      value = var.behaviors_prefix
+    }
+    # Set explicitly rather than relying on task metadata: a missing region is an obscure startup failure,
+    # and this is the first AWS service the application itself calls.
+    environment {
+      name  = "AWS_REGION"
+      value = var.region
     }
     # Unknown until the service exists (endpoint has a random hash). Set on the phase-2 apply from
     # the endpoint_url output; safe because the first boot has an empty DB and zero bots (research R3).

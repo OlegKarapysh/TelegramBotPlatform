@@ -61,6 +61,17 @@ variable "db_username" {
   description = "RDS master username."
 }
 
+variable "behaviors_prefix" {
+  type        = string
+  default     = "behaviors/"
+  description = "Key prefix for behavior-extension packages in the extension bucket. Must end with '/'."
+
+  validation {
+    condition     = endswith(var.behaviors_prefix, "/")
+    error_message = "behaviors_prefix must end with '/' so the IAM prefix condition and the application agree."
+  }
+}
+
 variable "webhook_base_url" {
   type        = string
   default     = ""

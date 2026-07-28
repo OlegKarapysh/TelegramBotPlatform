@@ -232,6 +232,12 @@ public class BotRegistrationServiceTests
         public IReadOnlyList<BehaviorDescriptor> List() => [];
 
         public Result Register(IBotBehavior behavior, string source) => Result.Ok();
+
+        public IReadOnlyList<string> KeysFromSource(string source) => [];
+
+        public Result ReplaceSource(string source, IReadOnlyList<IBotBehavior> behaviors) => Result.Ok();
+
+        public Result RemoveSource(string source) => Result.Ok();
     }
 
     private sealed class FakeBotLifecycle : IBotLifecycle

@@ -15,6 +15,7 @@ public static class ServiceInstaller
             services.AddSingleton<ITokenProtector, DataProtectionTokenProtector>();
 
             services.AddHttpClient();
+            services.AddTelegramHttpClients();
             services.AddSingleton<IBotClientRegistry, BotClientRegistry>();
             services.AddSingleton<IBotTokenValidator, TelegramBotTokenValidator>();
 
@@ -39,8 +40,83 @@ public static class ServiceInstaller
             services.AddSingleton<IBotLifecycle>(serviceProvider => serviceProvider.GetRequiredService<BotSupervisor>());
             services.AddHostedService<BotRestoreHostedService>();
 
-            services.AddSingleton<PluginStore>();
-            services.AddSingleton<ExtensionAssemblyLoader>();
+            services.AddExtensionStore();
+            services.AddSingleton<IExtensionLoader, ExtensionAssemblyLoader>();
+            // Composed by hand for two reasons. The size ceiling is passed as a value because
+            // PlatformOptions lives here in Infrastructure and Application must not reference it. And the
+            // bot lookup is a scoped-per-call delegate, because IBotRegistry wraps a DbContext and is
+            // scoped while this service is a singleton — injecting it directly would be a captive
+            // dependency (and the DI validator rejects it outright).
+            services.AddSingleton(serviceProvider =>
+            {
+                var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
+
+                return new BehaviorExtensionService(
+                    serviceProvider.GetRequiredService<IExtensionStore>(),
+                    serviceProvider.GetRequiredService<IExtensionLoader>(),
+                    serviceProvider.GetRequiredService<IBehaviorCatalog>(),
+                    async cancellationToken =>
+                    {
+                        await using var scope = scopeFactory.CreateAsyncScope();
+
+                        return await scope.ServiceProvider.GetRequiredService<IBotRegistry>().List(cancellationToken);
+                    },
+                    serviceProvider.GetRequiredService<IOptions<PlatformOptions>>().Value.MaxExtensionPackageBytes,
+                    serviceProvider.GetRequiredService<ILogger<BehaviorExtensionService>>());
+            });
+
+            return services;
+        }
+
+        /// <summary>
+        /// Registers the two named clients used to reach Telegram, with the factory's default logging
+        /// removed.
+        /// <para>
+        /// This is a confidentiality control, not a noise-reduction one. A bot token is carried in the
+        /// request <em>path</em> (<c>api.telegram.org/bot{token}/getMe</c>), and
+        /// <see cref="IHttpClientFactory"/>'s default handlers log the full request URI at Information
+        /// level — so out of the box every bot's credential is written to the log sink on every call, in
+        /// plaintext, for the sink's whole retention period. Stripping those loggers is what makes the
+        /// platform's "tokens are never logged" property actually true; the outcomes worth knowing about
+        /// are already logged by <see cref="BotSupervisor"/> and <see cref="TelegramBotTokenValidator"/>
+        /// without the URI.
+        /// </para>
+        /// </summary>
+        public IServiceCollection AddTelegramHttpClients()
+        {
+            services.AddHttpClient(nameof(BotClientRegistry)).RemoveAllLoggers();
+            services.AddHttpClient(nameof(TelegramBotTokenValidator)).RemoveAllLoggers();
+
+            return services;
+        }
+
+        /// <summary>
+        /// Picks where behavior extensions live: a configured bucket selects durable object storage,
+        /// without one they stay in the local plugins directory — which is what keeps local development
+        /// and the test suite free of cloud credentials.
+        /// <para>
+        /// The choice is made when <see cref="IExtensionStore"/> is first resolved, not here, so the S3
+        /// client and its credential lookup are never constructed at all on a machine with no bucket
+        /// configured.
+        /// </para>
+        /// </summary>
+        public IServiceCollection AddExtensionStore()
+        {
+            services.AddSingleton<FileSystemExtensionStore>();
+
+            // Region and credentials come from the ambient environment (AWS_REGION plus the task role on
+            // ECS), so there is nothing here to keep in sync with the infrastructure.
+            services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client());
+            services.AddSingleton<S3ExtensionStore>();
+
+            services.AddSingleton<IExtensionStore>(serviceProvider =>
+            {
+                var options = serviceProvider.GetRequiredService<IOptions<PlatformOptions>>().Value;
+
+                return string.IsNullOrWhiteSpace(options.PluginsBucket)
+                    ? serviceProvider.GetRequiredService<FileSystemExtensionStore>()
+                    : serviceProvider.GetRequiredService<S3ExtensionStore>();
+            });
 
             return services;
         }

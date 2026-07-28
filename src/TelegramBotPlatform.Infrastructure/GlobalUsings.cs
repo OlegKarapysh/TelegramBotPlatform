@@ -1,10 +1,13 @@
 global using System.Collections.Concurrent;
 global using System.ComponentModel.DataAnnotations;
 global using System.Globalization;
+global using System.Net;
 global using System.Reflection;
 global using System.Runtime.Loader;
 global using System.Security.Cryptography;
 global using System.Text;
+global using Amazon.S3;
+global using Amazon.S3.Model;
 global using FluentResults;
 global using MassTransit;
 global using Microsoft.AspNetCore.Builder;

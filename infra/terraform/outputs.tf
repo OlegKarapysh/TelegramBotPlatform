@@ -8,6 +8,12 @@ output "service_arn" {
   description = "Express service ARN (used by CI to deploy)."
 }
 
+# Non-sensitive: a bucket name is not a credential, and the bucket is private + TLS-only.
+output "behaviors_bucket_name" {
+  value       = aws_s3_bucket.behaviors.bucket
+  description = "S3 bucket holding operator-uploaded behavior-extension packages."
+}
+
 output "log_group_name" {
   value       = aws_cloudwatch_log_group.app.name
   description = "CloudWatch log group holding application logs."
