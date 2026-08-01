@@ -13,6 +13,7 @@ global using MassTransit;
 global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.DataProtection;
 global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Http.Metadata;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;

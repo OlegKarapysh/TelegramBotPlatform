@@ -1,6 +1,7 @@
 global using System.Collections.Concurrent;
 global using System.Collections.Frozen;
 global using System.Diagnostics;
+global using System.Globalization;
 global using FluentResults;
 global using MassTransit;
 global using Microsoft.Extensions.Logging;

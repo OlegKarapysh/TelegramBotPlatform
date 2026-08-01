@@ -54,7 +54,7 @@ public sealed class FileSystemExtensionStore(IOptions<PlatformOptions> platformO
 
         if (!overwrite && File.Exists(path))
         {
-            return new Error($"A behavior extension named \"{packageName}\" already exists.");
+            return new ExtensionConflictError($"A behavior extension named \"{packageName}\" already exists.");
         }
 
         try
@@ -93,11 +93,9 @@ public sealed class FileSystemExtensionStore(IOptions<PlatformOptions> platformO
 
     private string PathFor(string packageName) => Path.Combine(Directory, packageName);
 
-    private static Error NotFound(string packageName) =>
+    private static PackageNotFoundError NotFound(string packageName) =>
         new($"Behavior extension \"{packageName}\" was not found.");
 
-    // Wording is load-bearing: the service and the admin API tell an unreachable store (503, and a fatal at
-    // startup) apart from a missing package (404) by this phrase.
-    private Error Unreachable(Exception exception) =>
+    private StoreUnavailableError Unreachable(Exception exception) =>
         new($"The behavior extension store at \"{Directory}\" could not be reached: {exception.Message}");
 }

@@ -16,6 +16,8 @@ public sealed class ExtensionAssemblyLoader(IOptions<PlatformOptions> platformOp
     /// </summary>
     private string StagingDirectory => Path.Combine(platformOptions.Value.PluginsDirectory, ".staging");
 
+    private bool _sweptStaleStaging;
+
     public Result<ILoadedExtension> Load(string packageName, byte[] content)
     {
         string? stagedFilePath = null;
@@ -65,6 +67,8 @@ public sealed class ExtensionAssemblyLoader(IOptions<PlatformOptions> platformOp
     /// </summary>
     private string Stage(string packageName, byte[] content)
     {
+        SweepStaleStagingOnce();
+
         var directory = Path.Combine(StagingDirectory, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
 
@@ -72,6 +76,40 @@ public sealed class ExtensionAssemblyLoader(IOptions<PlatformOptions> platformOp
         File.WriteAllBytes(path, content);
 
         return path;
+    }
+
+    /// <summary>
+    /// Clears staged copies left by a previous process. A handle deletes its own directory on disposal, so
+    /// anything still here at the first load of this process was orphaned by a crash or a kill — nothing in
+    /// it is referenced, and left alone it would accumulate a copy per load, forever.
+    /// <para>
+    /// Once per process, on the first load rather than in the constructor: the loader is a singleton the DI
+    /// container may build eagerly, and deleting directories is not something a constructor should do.
+    /// Callers are serialised by <c>BehaviorExtensionService</c>'s mutation lock, so the flag needs no
+    /// interlocking; a redundant sweep would be harmless anyway.
+    /// </para>
+    /// </summary>
+    private void SweepStaleStagingOnce()
+    {
+        if (_sweptStaleStaging)
+        {
+            return;
+        }
+
+        _sweptStaleStaging = true;
+
+        try
+        {
+            if (Directory.Exists(StagingDirectory))
+            {
+                Directory.Delete(StagingDirectory, recursive: true);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort, exactly as on the disposal path: leftover staged copies cost disk, never
+            // correctness. The per-load directory created next is unaffected either way.
+        }
     }
 
     private static void Cleanup(string? stagedFilePath)

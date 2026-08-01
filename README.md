@@ -154,7 +154,7 @@ double-underscore form, e.g. `Platform__AdminApiKey`).
 
 | Section | Keys |
 |---------|------|
-| `Platform` | `AdminApiKey` (**required** — authenticates `/admin/*`), `PluginsDirectory` (default `plugins` — the extension store locally, the staging directory when a bucket is set), `PluginsBucket` (optional; setting it stores extensions in S3 instead), `PluginsPrefix` (default `behaviors/`), `MaxExtensionPackageBytes` (default 25 MB), `ExtensionStoreStartupTimeout` (default `00:00:30` — how long to retry the store before aborting startup), `WebhookBaseUrl` (**required outside `Development`**; each bot's webhook is `{WebhookBaseUrl}/{botId}`) |
+| `Platform` | `AdminApiKey` (**required** — authenticates `/admin/*`), `PluginsDirectory` (default `plugins` — the extension store locally, the staging directory when a bucket is set), `PluginsBucket` (optional; setting it stores extensions in S3 instead), `PluginsPrefix` (default `behaviors/`), `MaxExtensionPackageBytes` (default 25 MB — the upload endpoints raise the server's request-body limit to match, so this alone is the ceiling), `ExtensionStoreStartupTimeout` (default `00:00:30` — a single budget shared by the startup listing and every package read, after which startup aborts), `WebhookBaseUrl` (**required outside `Development`**; each bot's webhook is `{WebhookBaseUrl}/{botId}`) |
 | `Persistence` | `ConnectionString` (Postgres; keep the password in user secrets / env, never committed) |
 
 ## Build & test

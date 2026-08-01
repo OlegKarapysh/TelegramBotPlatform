@@ -29,7 +29,8 @@ public class BehaviorExtensionServiceTests
         var result = await service.Upload("Reverse.dll", Package(), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(["reverse"], result.Value);
+        Assert.Equal("Reverse.dll", result.Value.PackageName);
+        Assert.Equal(["reverse"], result.Value.BehaviorKeys);
         Assert.True(store.Contains("Reverse.dll"));
         Assert.True(catalog.TryGet("reverse", out _));
         // Field-by-field: the record's generated equality compares the key list by reference.
@@ -40,16 +41,21 @@ public class BehaviorExtensionServiceTests
         Assert.Null(status.Error);
     }
 
-    [Fact]
-    public async Task Upload_StripsPathSegments_FromTheSuppliedName()
+    [Theory]
+    [InlineData("../../Reverse.dll")]
+    [InlineData(@"C:\uploads\Reverse.dll")]
+    public async Task Upload_StripsPathSegments_FromTheSuppliedName(string suppliedName)
     {
+        // A multipart filename= header carries whatever the client put there, including a full Windows
+        // path. What gets stored — and reported back — must not depend on which OS the host runs on.
         var store = new InMemoryExtensionStore();
         var loader = new FakeExtensionLoader().Yields("Reverse.dll", "reverse");
         var service = CreateService(store, loader);
 
-        var result = await service.Upload("../../Reverse.dll", Package(), TestContext.Current.CancellationToken);
+        var result = await service.Upload(suppliedName, Package(), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
+        Assert.Equal("Reverse.dll", result.Value.PackageName);
         Assert.True(store.Contains("Reverse.dll"));
         Assert.Equal(1, store.Count);
     }
@@ -135,18 +141,15 @@ public class BehaviorExtensionServiceTests
         var result = await service.Upload("Reverse.dll", Package(), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
-        Assert.Contains(
-            BehaviorExtensionService.StoreUnreachableMarker,
-            result.Errors.First().Message,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<StoreUnavailableError>(result.Errors.First());
         Assert.Empty(catalog.List());
     }
 
     [Fact]
     public async Task Upload_Rejects_WhenThePackageExceedsTheConfiguredLimit()
     {
-        // The endpoint rejects on declared length before buffering; the service still refuses oversize
-        // content so the guarantee does not depend on a single call site.
+        // The endpoint rejects on declared length once form binding has buffered the part; the service
+        // still refuses oversize content so the guarantee does not depend on a single call site.
         var store = new InMemoryExtensionStore();
         var loader = new FakeExtensionLoader().Yields("Big.dll", "big");
         var service = CreateService(store, loader, maxPackageBytes: 8);
@@ -174,7 +177,8 @@ public class BehaviorExtensionServiceTests
         var result = await service.Replace("Reverse.dll", Package("v2"), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(["reverse", "reverse-words"], result.Value);
+        Assert.Equal("Reverse.dll", result.Value.PackageName);
+        Assert.Equal(["reverse", "reverse-words"], result.Value.BehaviorKeys);
         Assert.True(catalog.TryGet("reverse-words", out _));
         Assert.Equal("v2", Encoding.UTF8.GetString(store.Bytes("Reverse.dll")!));
         Assert.Equal(1, loader.Handles[0].DisposeCount);
@@ -260,7 +264,7 @@ public class BehaviorExtensionServiceTests
 
         Assert.True(result.IsFailed);
         Assert.Contains("12", result.Errors.First().Message, StringComparison.Ordinal);
-        Assert.Equal([12L], result.Errors.First().Metadata["bots"] as IReadOnlyList<long>);
+        Assert.Equal([12L], Assert.IsType<BehaviorInUseError>(result.Errors.First()).BotIds);
         Assert.True(catalog.TryGet("reverse", out _));
         Assert.False(catalog.TryGet("something-else", out _));
     }
@@ -345,7 +349,7 @@ public class BehaviorExtensionServiceTests
         var result = await service.Remove("Reverse.dll", TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
-        Assert.Equal([34L], result.Errors.First().Metadata["bots"] as IReadOnlyList<long>);
+        Assert.Equal([34L], Assert.IsType<BehaviorInUseError>(result.Errors.First()).BotIds);
         Assert.True(store.Contains("Reverse.dll"));
         Assert.True(catalog.TryGet("reverse", out _));
         Assert.Equal(0, loader.Handles[0].DisposeCount);
@@ -461,10 +465,7 @@ public class BehaviorExtensionServiceTests
         var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
-        Assert.Contains(
-            BehaviorExtensionService.StoreUnreachableMarker,
-            result.Errors.First().Message,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<StoreUnavailableError>(result.Errors.First());
     }
 
     [Fact]
@@ -484,6 +485,25 @@ public class BehaviorExtensionServiceTests
     }
 
     [Fact]
+    public async Task RestoreAll_RetriesAPackageRead_AndSucceedsWhenTheStoreRecovers()
+    {
+        // The same outage that makes the listing flaky makes the reads flaky. Retrying only the listing
+        // would leave a package marked broken for the process's whole life over a blip it rode out once.
+        var store = new InMemoryExtensionStore { FailReadTimes = 2 };
+        store.Seed("A.dll");
+        var loader = new FakeExtensionLoader().Yields("A.dll", "a");
+        var catalog = new BehaviorCatalog();
+        var service = CreateService(store, loader, catalog);
+
+        var result = await service.RestoreAll(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, store.ReadCallCount);
+        Assert.True(catalog.TryGet("a", out _));
+        Assert.True(Assert.Single(service.Packages).Loaded);
+    }
+
+    [Fact]
     public async Task RestoreAll_RecordsAPackageItCannotRead()
     {
         var store = new InMemoryExtensionStore();
@@ -495,6 +515,28 @@ public class BehaviorExtensionServiceTests
 
         Assert.True(result.IsSuccess);
         Assert.False(Assert.Single(service.Packages).Loaded);
+    }
+
+    [Fact]
+    public async Task RestoreAll_RecordsAStoredNameItRefusesToTrust_WithoutLoadingIt()
+    {
+        // The store's contents are not necessarily only what this platform put there — a stray object in
+        // the bucket, or a prefix misconfigured to "", can surface a name that is about to become a path.
+        var store = new InMemoryExtensionStore();
+        store.Seed("../escape.dll");
+        store.Seed("Good.dll");
+        var loader = new FakeExtensionLoader().Yields("Good.dll", "good");
+        var catalog = new BehaviorCatalog();
+        var service = CreateService(store, loader, catalog);
+
+        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(catalog.TryGet("good", out _));
+
+        var rejected = service.Packages.Single(package => package.PackageName == "../escape.dll");
+        Assert.False(rejected.Loaded);
+        Assert.DoesNotContain(loader.Handles, handle => handle.PackageName.Contains("escape", StringComparison.Ordinal));
     }
 
     // --- Helpers ------------------------------------------------------------------------------------

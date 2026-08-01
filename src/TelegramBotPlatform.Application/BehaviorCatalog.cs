@@ -79,7 +79,7 @@ public sealed class BehaviorCatalog : IBehaviorCatalog
 
             if (current.ContainsKey(behavior.Key))
             {
-                return new Error($"A behavior with key \"{behavior.Key}\" is already registered.");
+                return new ExtensionConflictError($"A behavior with key \"{behavior.Key}\" is already registered.");
             }
 
             var next = current.ToDictionary(StringComparer.Ordinal);
@@ -119,7 +119,7 @@ public sealed class BehaviorCatalog : IBehaviorCatalog
                 if (current.TryGetValue(behavior.Key, out var existing)
                     && !string.Equals(existing.Source, source, StringComparison.Ordinal))
                 {
-                    return new Error($"A behavior with key \"{behavior.Key}\" is already registered.");
+                    return new ExtensionConflictError($"A behavior with key \"{behavior.Key}\" is already registered.");
                 }
             }
 

@@ -82,8 +82,13 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
   `Platform:PluginsDirectory` by default, `S3ExtensionStore` when `Platform:PluginsBucket` is set (ECS, where
   local disk is ephemeral). `BehaviorExtensionService` owns upload/replace/remove/restore; it restores every
   stored package before the host serves, and **aborts startup** if the store cannot be read within
-  `Platform:ExtensionStoreStartupTimeout` rather than running with an incomplete catalog. A single unloadable
-  package is logged, skipped, and reported via `GET /admin/behaviors`.
+  `Platform:ExtensionStoreStartupTimeout` rather than running with an incomplete catalog. That budget is one
+  deadline shared by the listing and every package read, so the delay does not scale with package count. A
+  single unloadable package is logged, skipped, and reported via `GET /admin/behaviors`.
+- **Package names are validated in both directions**, by `ExtensionPackageName`. On the way in, `Validate`
+  *normalises* (a client's `filename=` may carry a full path — backslashes are folded first so the result
+  never depends on the host OS). On the way back out of a store, `ValidateStored` *refuses* anything it would
+  have to rewrite: a tidied name would no longer address the object the store actually holds.
 - **Bot tokens are encrypted at rest** via `ITokenProtector` (Data Protection, key ring in
   `platform.DataProtectionKeys`) — never stored in plaintext, never logged. Keeping the "never logged" half true
   takes two deliberate measures, because the token travels in the Telegram request **path**
@@ -99,6 +104,11 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
 
 - **Result, not exceptions, for expected failures.** Public methods that can fail return `FluentResults.Result<T>`;
   check `.IsFailed` / `.Errors.First().Message`. Reserve `throw` for programmer errors / invariants.
+  When a caller has to *act* on which failure it was, give the failure a type rather than a recognisable
+  phrase — see `ExtensionErrors.cs` (`StoreUnavailableError`, `PackageNotFoundError`,
+  `ExtensionConflictError`, `BehaviorInUseError`), which is how `AdminEndpoints.MapFailure` picks a status
+  code and how startup decides an unreachable store is fatal. The bot endpoints still classify on message
+  text; that is the older path, not the one to copy.
 - **DI registration uses C# extension members** (not classic extension methods):
   ```csharp
   public static class ServiceInstaller

@@ -21,7 +21,12 @@ public sealed class InMemoryExtensionStore : IExtensionStore
     /// <summary>Number of remaining <see cref="List"/> calls to fail before recovering — for retry tests.</summary>
     public int FailListTimes { get; set; }
 
+    /// <summary>Number of remaining <see cref="Read"/> calls to fail before recovering — for retry tests.</summary>
+    public int FailReadTimes { get; set; }
+
     public int ListCallCount { get; private set; }
+
+    public int ReadCallCount { get; private set; }
 
     /// <summary>Seeds a package directly, as if it had been uploaded in an earlier run.</summary>
     public void Seed(string packageName, byte[]? content = null) =>
@@ -50,6 +55,14 @@ public sealed class InMemoryExtensionStore : IExtensionStore
 
     public Task<Result<byte[]>> Read(string packageName, CancellationToken cancellationToken = default)
     {
+        ReadCallCount++;
+
+        if (FailReadTimes > 0)
+        {
+            FailReadTimes--;
+            return Task.FromResult(Result.Fail<byte[]>(Unreachable()));
+        }
+
         if (FailRead)
         {
             return Task.FromResult(Result.Fail<byte[]>(Unreachable()));
@@ -57,7 +70,7 @@ public sealed class InMemoryExtensionStore : IExtensionStore
 
         return Task.FromResult(_packages.TryGetValue(packageName, out var content)
             ? Result.Ok(content)
-            : Result.Fail<byte[]>($"Behavior extension \"{packageName}\" was not found."));
+            : Result.Fail<byte[]>(new PackageNotFoundError($"Behavior extension \"{packageName}\" was not found.")));
     }
 
     public async Task<Result> Write(string packageName, Stream content, bool overwrite, CancellationToken cancellationToken = default)
@@ -69,7 +82,7 @@ public sealed class InMemoryExtensionStore : IExtensionStore
 
         if (!overwrite && _packages.ContainsKey(packageName))
         {
-            return Result.Fail($"A behavior extension named \"{packageName}\" already exists.");
+            return Result.Fail(new ExtensionConflictError($"A behavior extension named \"{packageName}\" already exists."));
         }
 
         using var buffer = new MemoryStream();
@@ -90,6 +103,8 @@ public sealed class InMemoryExtensionStore : IExtensionStore
         return Task.FromResult(Result.Ok());
     }
 
-    // Mirrors the wording the real stores use, so the service's failure classification is exercised too.
-    private static string Unreachable() => "The behavior extension store could not be reached.";
+    // The real stores report an outage with this type, and the service and admin API classify on the type
+    // rather than on wording — so this fake exercises the same path without having to mirror any phrasing.
+    private static StoreUnavailableError Unreachable() =>
+        new("The behavior extension store could not be reached.");
 }

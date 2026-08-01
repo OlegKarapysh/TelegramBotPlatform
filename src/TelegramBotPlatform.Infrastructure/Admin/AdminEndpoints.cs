@@ -15,12 +15,35 @@ public static class AdminEndpoints
         group.MapPut("/bots/{id:long}/token", RotateToken);
         group.MapDelete("/bots/{id:long}", RemoveBot);
         group.MapGet("/behaviors", ListBehaviors);
+
+        var uploadSizeLimit = ExtensionUploadSizeLimit.From(
+            app.Services.GetRequiredService<IOptions<PlatformOptions>>().Value);
+
         // The multipart IFormFile parameter auto-attaches anti-forgery metadata, which would require the
         // UseAntiforgery middleware + a token. This is an operator-only, API-key-authenticated machine
         // endpoint (no cookies/browser), so anti-forgery adds nothing — opt out of it.
-        group.MapPost("/behaviors", UploadBehaviorExtension).DisableAntiforgery();
-        group.MapPut("/behaviors/{packageName}", ReplaceBehaviorExtension).DisableAntiforgery();
+        group.MapPost("/behaviors", UploadBehaviorExtension).DisableAntiforgery().WithMetadata(uploadSizeLimit);
+        group.MapPut("/behaviors/{packageName}", ReplaceBehaviorExtension).DisableAntiforgery().WithMetadata(uploadSizeLimit);
         group.MapDelete("/behaviors/{packageName}", RemoveBehaviorExtension);
+    }
+
+    /// <summary>
+    /// Raises the transport-level body limit on the two upload endpoints to fit the configured package
+    /// ceiling.
+    /// <para>
+    /// Without this the server's 30 MB default caps the request first, so raising
+    /// <see cref="PlatformOptions.MaxExtensionPackageBytes"/> past it would silently not work — the upload
+    /// would die on the wire with an opaque 413 before any of this file's friendlier handling ran. The
+    /// headroom covers multipart framing (boundaries and part headers), which is counted against the
+    /// request body but is not part of the package.
+    /// </para>
+    /// </summary>
+    private sealed record ExtensionUploadSizeLimit(long? MaxRequestBodySize) : IRequestSizeLimitMetadata
+    {
+        private const long MultipartFramingHeadroom = 1024 * 1024;
+
+        public static ExtensionUploadSizeLimit From(PlatformOptions options) =>
+            new(options.MaxExtensionPackageBytes + MultipartFramingHeadroom);
     }
 
     private static async Task<IResult> RegisterBot(RegisterBotRequest request, BotRegistrationService service, CancellationToken cancellationToken)
@@ -82,7 +105,7 @@ public static class AdminEndpoints
     /// </summary>
     private static async Task<IResult> UploadBehaviorExtension(
         IFormFile package,
-        BehaviorExtensionService extensions,
+        BehaviorExtensionService behaviorExtensionService,
         IOptions<PlatformOptions> platformOptions,
         CancellationToken cancellationToken)
     {
@@ -92,11 +115,15 @@ public static class AdminEndpoints
         }
 
         await using var stream = package.OpenReadStream();
-        var result = await extensions.Upload(package.FileName, stream, cancellationToken);
+        var result = await behaviorExtensionService.Upload(package.FileName, stream, cancellationToken);
 
+        // Echo the name the service actually stored under, not a re-derivation of the client's — the two
+        // differ whenever the supplied name carried a path or padding.
         return result.IsFailed
             ? MapFailure(result.Errors)
-            : Results.Created("/admin/behaviors", new { loaded = result.Value, assembly = Path.GetFileName(package.FileName) });
+            : Results.Created(
+                $"/admin/behaviors/{result.Value.PackageName}",
+                new { loaded = result.Value.BehaviorKeys, assembly = result.Value.PackageName });
     }
 
     /// <summary>
@@ -121,7 +148,7 @@ public static class AdminEndpoints
 
         return result.IsFailed
             ? MapFailure(result.Errors)
-            : Results.Ok(new { loaded = result.Value, assembly = Path.GetFileName(packageName) });
+            : Results.Ok(new { loaded = result.Value.BehaviorKeys, assembly = result.Value.PackageName });
     }
 
     /// <summary>Removes a stored extension. Refused while a registered bot is still assigned to one of its behaviors.</summary>
@@ -134,8 +161,13 @@ public static class AdminEndpoints
     }
 
     /// <summary>
-    /// Rejects an oversized package on its declared length, before a single byte is buffered — an
-    /// unbounded upload would otherwise be a way to exhaust the platform's memory.
+    /// Rejects an oversized package with a message naming the limit, rather than letting it die on the wire.
+    /// <para>
+    /// This is the friendly half of the ceiling, not the enforcing one: form binding has already buffered
+    /// the part (in memory to 64 KB, then to a temp file) by the time this runs, so it bounds what the
+    /// platform loads into <em>managed memory</em>, not what it accepts off the socket. The transport bound
+    /// is <see cref="ExtensionUploadSizeLimit"/>, which the server applies before reading the body at all.
+    /// </para>
     /// </summary>
     private static IResult? RejectIfTooLarge(IFormFile package, PlatformOptions options)
     {
@@ -151,17 +183,35 @@ public static class AdminEndpoints
             statusCode: StatusCodes.Status413PayloadTooLarge);
     }
 
-    /// <summary>Maps a domain failure message to the closest HTTP status; never echoes back a token.</summary>
+    /// <summary>
+    /// Maps a domain failure to the closest HTTP status; never echoes back a token.
+    /// <para>
+    /// The extension lifecycle reports failures as <see cref="ExtensionError"/> subtypes, so its mapping is
+    /// by type and survives any rewording. The bot endpoints still return plain errors, which the message
+    /// checks below cover — those are the fallback, not the primary mechanism.
+    /// </para>
+    /// </summary>
     private static IResult MapFailure(IReadOnlyList<IError> errors)
     {
         var error = errors.Count > 0 ? errors[0] : null;
         var message = error?.Message ?? "The request could not be completed.";
 
-        // A store that cannot be reached is neither the caller's fault nor a missing resource — it is the
-        // platform being temporarily unable to serve, so it must not be reported as a 400.
-        if (message.Contains(BehaviorExtensionService.StoreUnreachableMarker, StringComparison.OrdinalIgnoreCase))
+        switch (error)
         {
-            return Results.Json(new { error = message }, statusCode: StatusCodes.Status503ServiceUnavailable);
+            // A store that cannot be reached is neither the caller's fault nor a missing resource — it is
+            // the platform being temporarily unable to serve, so it must not be reported as a 400.
+            case StoreUnavailableError:
+                return Results.Json(new { error = message }, statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            case PackageNotFoundError:
+                return Results.NotFound(new { error = message });
+
+            case ExtensionConflictError:
+                return Results.Conflict(new { error = message });
+
+            // An in-use refusal carries the blocking bot ids so tooling need not parse the message.
+            case BehaviorInUseError inUse:
+                return Results.Conflict(new { error = message, bots = inUse.BotIds });
         }
 
         if (message.Contains("already registered", StringComparison.OrdinalIgnoreCase)
@@ -173,12 +223,6 @@ public static class AdminEndpoints
         if (message.Contains("was not found", StringComparison.OrdinalIgnoreCase))
         {
             return Results.NotFound(new { error = message });
-        }
-
-        // An in-use refusal carries the blocking bot ids as metadata so tooling need not parse the message.
-        if (error?.Metadata.TryGetValue("bots", out var bots) is true)
-        {
-            return Results.Conflict(new { error = message, bots });
         }
 
         return Results.BadRequest(new { error = message });

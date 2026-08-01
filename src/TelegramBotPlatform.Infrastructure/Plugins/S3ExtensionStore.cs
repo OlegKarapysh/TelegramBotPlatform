@@ -95,7 +95,7 @@ public sealed class S3ExtensionStore(IAmazonS3 s3, IOptions<PlatformOptions> pla
         }
         catch (AmazonS3Exception exception) when (exception.StatusCode == HttpStatusCode.PreconditionFailed)
         {
-            return new Error($"A behavior extension named \"{packageName}\" already exists.");
+            return new ExtensionConflictError($"A behavior extension named \"{packageName}\" already exists.");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -120,15 +120,24 @@ public sealed class S3ExtensionStore(IAmazonS3 s3, IOptions<PlatformOptions> pla
 
     private string KeyFor(string packageName) => $"{Prefix}{packageName}";
 
+    /// <summary>
+    /// S3 only answers <c>404</c> for an absent key when the caller holds <c>s3:ListBucket</c> on the
+    /// bucket; otherwise it answers <c>403</c> so as not to leak whether the key exists. The task role's
+    /// <c>ListBucket</c> grant is conditioned on <c>s3:prefix</c>, and that condition key is absent from a
+    /// <c>GetObject</c> authorization context — so in the deployed configuration a missing package usually
+    /// surfaces as <c>403</c> and is reported as an unavailable store rather than a not-found. That is the
+    /// safer way round (a genuine permission fault is never mistaken for an empty slot), and it costs
+    /// nothing in practice because every caller lists before it reads.
+    /// </summary>
     private static bool IsMissing(AmazonS3Exception exception) =>
         exception.StatusCode == HttpStatusCode.NotFound
         || string.Equals(exception.ErrorCode, "NoSuchKey", StringComparison.Ordinal);
 
-    private static Error NotFound(string packageName) =>
+    private static PackageNotFoundError NotFound(string packageName) =>
         new($"Behavior extension \"{packageName}\" was not found.");
 
     // Names the bucket and the reason so an operator can tell a misconfiguration (wrong bucket, missing
     // permission) from an outage. Never includes credentials — the SDK does not put them in messages.
-    private Error Unreachable(Exception exception) =>
+    private StoreUnavailableError Unreachable(Exception exception) =>
         new($"The behavior extension store (bucket \"{Bucket}\") could not be reached: {exception.Message}");
 }
