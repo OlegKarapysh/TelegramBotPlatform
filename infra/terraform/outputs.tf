@@ -3,9 +3,19 @@ output "ecr_repository_url" {
   description = "Image push target (used by CI and push-image.sh)."
 }
 
-output "service_arn" {
-  value       = aws_ecs_express_gateway_service.app.service_arn
-  description = "Express service ARN (used by CI to deploy)."
+output "cluster_name" {
+  value       = aws_ecs_cluster.app.name
+  description = "ECS cluster hosting the service (used by CI to deploy)."
+}
+
+output "service_name" {
+  value       = aws_ecs_service.app.name
+  description = "ECS service name (used by CI to deploy)."
+}
+
+output "task_definition_family" {
+  value       = aws_ecs_task_definition.app.family
+  description = "Task-definition family CI registers new revisions against."
 }
 
 # Non-sensitive: a bucket name is not a credential, and the bucket is private + TLS-only.
@@ -30,16 +40,19 @@ output "db_instance_id" {
   description = "RDS instance identifier."
 }
 
-# The nested shape of `ingress_paths` is not documented for this new resource. Output the raw value
-# so you can inspect it (e.g. `terraform state show aws_ecs_express_gateway_service.app`).
-output "ingress_paths" {
-  value       = aws_ecs_express_gateway_service.app.ingress_paths
-  description = "Raw ingress paths — inspect to confirm endpoint + load balancer ARN attribute names."
+output "endpoint_url" {
+  value       = aws_apigatewayv2_api.app.api_endpoint
+  description = "Public HTTPS base URL (API Gateway). Only the routes in apigateway.tf are reachable."
 }
 
-# ingress_paths elements expose only `access_type` and `endpoint` — the Terraform provider does NOT
-# surface the load balancer ARN. Inspect the `ingress_paths` output above to pick the PUBLIC entry.
-output "endpoint_url" {
-  value       = try(aws_ecs_express_gateway_service.app.ingress_paths[0].endpoint, null)
-  description = "HTTPS base URL. Feed into webhook_base_url on the phase-2 apply (confirm it is the public ingress path)."
+# What each bot's webhook is actually registered under. Nothing needs to be fed back in — the task
+# definition already consumes this value, so the stack converges in one apply.
+output "webhook_base_url" {
+  value       = local.webhook_base_url
+  description = "Base URL bots register webhooks under; BotSupervisor appends '/{botId}'."
+}
+
+output "admin_publicly_routable" {
+  value       = var.admin_publicly_routable
+  description = "Whether /admin/* is exposed publicly. False means reach it via `aws ecs execute-command`."
 }

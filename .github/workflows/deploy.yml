@@ -31,7 +31,11 @@ jobs:
 
   build-and-push:
     needs: test # tests gate the deploy (FR-014)
-    runs-on: ubuntu-latest
+    # ARM runner so the arm64 image builds natively. Fargate runs ARM64 (Graviton) because it is ~20%
+    # cheaper than x86; cross-building under QEMU on an x64 runner works but takes many times longer
+    # for a .NET publish. If ARM runners are unavailable on your plan, either switch this to
+    # ubuntu-latest with docker/setup-qemu-action, or set cpu_architecture = "X86_64" in Terraform.
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - name: Configure AWS credentials (OIDC)
@@ -43,7 +47,7 @@ jobs:
         run: aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.ECR_REPOSITORY_URL }}"
       - name: Build and push image (tagged with the commit SHA)
         run: |
-          docker build -f src/TelegramBotPlatform.WebApi/Dockerfile \
+          docker build --platform linux/arm64 -f src/TelegramBotPlatform.WebApi/Dockerfile \
             -t "${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}" .
           docker push "${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}"
 
@@ -56,10 +60,43 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - name: Roll out the new image to the Express service
+
+      # Take the family's current revision, swap only the image, and register the result. Everything
+      # else (env, secrets, health check, roles, architecture) stays exactly as Terraform defined it,
+      # so CI cannot silently drift the task shape. The read-only fields in the describe output are
+      # not accepted by register-task-definition and must be stripped.
+      - name: Register a task-definition revision with the new image
+        id: register
         run: |
-          # TODO(verify): replace with the exact AWS CLI command to update an ECS Express gateway
-          # service's image to ${{ github.sha }}. Express Mode performs a health-gated canary rollout
-          # with automatic rollback (FR-008). The service is: ${{ vars.EXPRESS_SERVICE_ARN }}
-          echo "Deploy ${{ vars.EXPRESS_SERVICE_ARN }} -> image tag ${{ github.sha }}"
-          exit 1 # remove once the real update command is in place
+          set -euo pipefail
+          aws ecs describe-task-definition \
+            --task-definition "${{ vars.ECS_TASK_FAMILY }}" \
+            --query taskDefinition > current.json
+
+          jq --arg IMAGE "${{ vars.ECR_REPOSITORY_URL }}:${{ github.sha }}" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' current.json > next.json
+
+          ARN=$(aws ecs register-task-definition --cli-input-json file://next.json \
+                  --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_definition_arn=$ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $ARN"
+
+      # --wait services-stable blocks until the rollout settles. The service's deployment circuit
+      # breaker rolls back to the previous revision on a failed rollout, so a broken image leaves the
+      # last good one serving — but the wait would then time out and fail this job, which is what
+      # surfaces the failure instead of reporting a green deploy over a rolled-back service.
+      - name: Roll out and wait for the service to stabilise
+        run: |
+          set -euo pipefail
+          aws ecs update-service \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --service "${{ vars.ECS_SERVICE }}" \
+            --task-definition "${{ steps.register.outputs.task_definition_arn }}" \
+            --no-cli-pager --query 'service.serviceName' --output text
+
+          aws ecs wait services-stable \
+            --cluster "${{ vars.ECS_CLUSTER }}" \
+            --services "${{ vars.ECS_SERVICE }}"

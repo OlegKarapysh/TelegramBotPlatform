@@ -71,23 +71,29 @@ resource "aws_iam_role_policy" "task_behaviors_bucket" {
   policy = data.aws_iam_policy_document.task_behaviors_bucket.json
 }
 
-# --- Express Mode infrastructure role: lets ECS manage the ALB/infra on your behalf ---
-data "aws_iam_policy_document" "ecs_service_assume" {
+# ECS Exec (`aws ecs execute-command`) is how the operator API is reached now that it is not publicly
+# routed — see apigateway.tf. This is a deliberate widening of a role that previously held nothing but
+# the S3 grant above, and it is the cost of taking /admin off the internet.
+#
+# These four actions only open the SSM message channel used to attach to a running container; they
+# grant no access to any other AWS resource. Resources cannot be scoped further — the channel is not
+# addressable by ARN. If var.admin_publicly_routable is ever set true and ECS Exec is not wanted,
+# drop enable_execute_command in service.tf and this policy together.
+data "aws_iam_policy_document" "task_exec_channel" {
   statement {
-    actions = ["sts:AssumeRole"]
-    principals {
-      type        = "Service"
-      identifiers = ["ecs.amazonaws.com"]
-    }
+    sid = "EcsExecSsmChannel"
+    actions = [
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ]
+    resources = ["*"]
   }
 }
 
-resource "aws_iam_role" "infrastructure" {
-  name               = "${var.project_name}-express-infra"
-  assume_role_policy = data.aws_iam_policy_document.ecs_service_assume.json
-}
-
-resource "aws_iam_role_policy_attachment" "infrastructure_managed" {
-  role       = aws_iam_role.infrastructure.name
-  policy_arn = var.express_infrastructure_role_policy_arn
+resource "aws_iam_role_policy" "task_exec_channel" {
+  name   = "ecs-exec-channel"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_exec_channel.json
 }
