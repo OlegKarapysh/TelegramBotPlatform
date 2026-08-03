@@ -26,8 +26,9 @@ if (args.Contains("migrate"))
 }
 
 // Runs before the host starts serving traffic/receivers, so every bot's assigned behavior is already
-// present by the time BotUpdateRouter looks it up.
-app.RegisterBehaviors();
+// present by the time BotUpdateRouter looks it up. Throws — and so aborts startup — if the extension
+// store cannot be read, rather than serving an incomplete behavior catalog.
+await app.RegisterBehaviors();
 
 app.UseForwardedHeaders();
 

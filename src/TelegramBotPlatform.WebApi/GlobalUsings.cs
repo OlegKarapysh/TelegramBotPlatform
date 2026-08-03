@@ -1,11 +1,10 @@
 global using MassTransit;
 global using Microsoft.AspNetCore.HttpOverrides;
 global using Microsoft.EntityFrameworkCore;
+global using Microsoft.Extensions.Options;
 global using Telegram.Bot;
-global using Telegram.Bot.Types;
 global using TelegramBotPlatform.Application;
 global using TelegramBotPlatform.Infrastructure;
-global using TelegramBotPlatform.Infrastructure.Plugins;
 global using TelegramBotPlatform.Public.Behaviors;
 global using TelegramBotPlatform.WebApi;
 global using TelegramBotPlatform.WebApi.Behaviors;

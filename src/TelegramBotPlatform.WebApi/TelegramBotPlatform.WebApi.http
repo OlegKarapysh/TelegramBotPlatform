@@ -49,8 +49,9 @@ Content-Type: application/json
 DELETE {{host}}/admin/bots/1
 Authorization: Bearer {{adminKey}}
 
-### Upload a behavior extension (compiled plugin DLL) at runtime
+### Upload a NEW behavior extension (compiled plugin DLL) at runtime
 # Build samples/ReverseBehavior first, then point this at its DLL.
+# Create-only: re-uploading an existing name returns 409 — use the PUT below to ship a new build.
 POST {{host}}/admin/behaviors
 Authorization: Bearer {{adminKey}}
 Content-Type: multipart/form-data; boundary=----plugin
@@ -61,3 +62,22 @@ Content-Type: application/octet-stream
 
 < ./../../samples/ReverseBehavior/bin/Release/net10.0/ReverseBehavior.dll
 ------plugin--
+
+### Replace a stored behavior extension with a new build (hot-swap, no restart)
+# Behaviors swap for bots that are already running. If the new build fails to load — or drops a behavior
+# a bot is still assigned to — nothing changes at all.
+PUT {{host}}/admin/behaviors/ReverseBehavior.dll
+Authorization: Bearer {{adminKey}}
+Content-Type: multipart/form-data; boundary=----plugin
+
+------plugin
+Content-Disposition: form-data; name="package"; filename="ReverseBehavior.dll"
+Content-Type: application/octet-stream
+
+< ./../../samples/ReverseBehavior/bin/Release/net10.0/ReverseBehavior.dll
+------plugin--
+
+### Remove a stored behavior extension
+# 409 with the blocking bot ids while any registered bot still uses one of its behaviors.
+DELETE {{host}}/admin/behaviors/ReverseBehavior.dll
+Authorization: Bearer {{adminKey}}

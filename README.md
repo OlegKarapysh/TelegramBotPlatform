@@ -101,10 +101,17 @@ All `/admin/*` requests require the configured admin key via `Authorization: Bea
 | `POST /admin/bots/{id}/enable` | Resume a disabled bot. |
 | `PUT /admin/bots/{id}/token` | Rotate a bot's credential `{ token }` (must be the same Telegram bot). |
 | `DELETE /admin/bots/{id}` | Remove a bot. |
-| `GET /admin/behaviors` | List available behaviors (built-in + uploaded extensions). |
-| `POST /admin/behaviors` | Upload a behavior-extension assembly (multipart field `package`). |
+| `GET /admin/behaviors` | List available behaviors **and** every stored extension package with its load status — `{ behaviors: [...], packages: [...] }`. |
+| `POST /admin/behaviors` | Upload a **new** behavior-extension assembly (multipart field `package`). A name already in the store is a `409`. |
+| `PUT /admin/behaviors/{packageName}` | Replace a stored extension with a new build (multipart field `package`); its behaviors hot-swap for bots already running. |
+| `DELETE /admin/behaviors/{packageName}` | Remove a stored extension. Refused with `409` while a registered bot is still assigned to one of its behaviors. |
 
 `GET /health` is an unauthenticated liveness probe.
+
+Extension packages are stored **durably** — in the local plugins directory by default, or in an S3 bucket
+when `Platform:PluginsBucket` is set — so an uploaded behavior survives a restart or a redeploy. A package
+that fails to load does not block startup; it shows up in `packages` with a reason, and can be repaired
+with `PUT` or retired with `DELETE` using nothing but the admin API.
 
 ## Writing a behavior extension
 
@@ -147,7 +154,7 @@ double-underscore form, e.g. `Platform__AdminApiKey`).
 
 | Section | Keys |
 |---------|------|
-| `Platform` | `AdminApiKey` (**required** — authenticates `/admin/*`), `PluginsDirectory` (default `plugins`), `WebhookBaseUrl` (**required outside `Development`**; each bot's webhook is `{WebhookBaseUrl}/{botId}`) |
+| `Platform` | `AdminApiKey` (**required** — authenticates `/admin/*`), `PluginsDirectory` (default `plugins` — the extension store locally, the staging directory when a bucket is set), `PluginsBucket` (optional; setting it stores extensions in S3 instead), `PluginsPrefix` (default `behaviors/`), `MaxExtensionPackageBytes` (default 25 MB — the upload endpoints raise the server's request-body limit to match, so this alone is the ceiling), `ExtensionStoreStartupTimeout` (default `00:00:30` — a single budget shared by the startup listing and every package read, after which startup aborts), `WebhookBaseUrl` (**required outside `Development`**; each bot's webhook is `{WebhookBaseUrl}/{botId}`) |
 | `Persistence` | `ConnectionString` (Postgres; keep the password in user secrets / env, never committed) |
 
 ## Build & test

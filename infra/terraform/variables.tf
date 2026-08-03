@@ -14,9 +14,16 @@ variable "image_tag" {
   description = "Container image tag to deploy (CI sets this to the git SHA)."
 }
 
-variable "admin_allowlist_cidrs" {
-  type        = list(string)
-  description = "Source CIDRs permitted to reach /admin/* (in addition to the admin key)."
+variable "admin_publicly_routable" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Expose /admin/* through the public API. Default false: the operator API is reached with
+    `aws ecs execute-command` instead, which keeps it off the internet entirely.
+
+    Setting this true leaves the admin key as the ONLY control — the WAF IP allowlist that used to
+    front /admin cannot be carried over, because WAF does not support API Gateway HTTP APIs.
+  EOT
 }
 
 variable "admin_api_key" {
@@ -61,32 +68,67 @@ variable "db_username" {
   description = "RDS master username."
 }
 
+variable "behaviors_prefix" {
+  type        = string
+  default     = "behaviors/"
+  description = "Key prefix for behavior-extension packages in the extension bucket. Must end with '/'."
+
+  validation {
+    condition     = endswith(var.behaviors_prefix, "/")
+    error_message = "behaviors_prefix must end with '/' so the IAM prefix condition and the application agree."
+  }
+}
+
 variable "webhook_base_url" {
   type        = string
   default     = ""
-  description = "Public HTTPS base URL for Telegram webhooks. Set on the phase-2 apply from the endpoint_url output (research R3)."
+  description = <<-EOT
+    Override for the public HTTPS base URL bots register their webhooks under. Leave empty (the
+    default) and the stack wires itself from the API Gateway endpoint in a single apply — the
+    two-phase apply Express Mode required is gone.
+
+    Set this only for a custom domain. It MUST end in the webhook path prefix, e.g.
+    "https://bots.example.com/telegram-bot/webhook", because BotSupervisor appends just "/{botId}".
+  EOT
+}
+
+variable "desired_count" {
+  type        = number
+  default     = 1
+  description = "Number of Fargate tasks. Single-task by design (no multi-AZ HA); see the availability decision."
+}
+
+variable "cpu_architecture" {
+  type        = string
+  default     = "ARM64"
+  description = <<-EOT
+    Fargate CPU architecture. ARM64 (Graviton) is ~20% cheaper than X86_64 and is only reachable
+    because this stack left ECS Express Mode, which has no runtime_platform attribute.
+
+    The image must be built for the matching platform — CI builds arm64 on an ARM runner. Set to
+    X86_64 if you cannot build arm64 images; that costs about $4/mo of the saving.
+  EOT
+
+  validation {
+    condition     = contains(["ARM64", "X86_64"], var.cpu_architecture)
+    error_message = "cpu_architecture must be ARM64 or X86_64."
+  }
 }
 
 variable "cpu" {
   type        = string
   default     = "512"
-  description = "Express task CPU units (power of 2, 256-4096)."
+  description = "Fargate task CPU units (power of 2, 256-4096)."
 }
 
 variable "memory" {
   type        = string
   default     = "1024"
-  description = "Express task memory in MiB (512-8192)."
+  description = "Fargate task memory in MiB (512-8192)."
 }
 
 variable "log_retention_days" {
   type        = number
   default     = 30
-  description = "CloudWatch log retention in days."
-}
-
-variable "express_infrastructure_role_policy_arn" {
-  type        = string
-  default     = "arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices"
-  description = "AWS-managed policy attached to the Express Mode infrastructure role."
+  description = "CloudWatch log retention in days (application and API Gateway access logs)."
 }

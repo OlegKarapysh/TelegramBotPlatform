@@ -64,9 +64,11 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
   only this assembly. Its assembly name (`TelegramBotPlatform.Public`) is shared with plugins by
   `ExtensionAssemblyLoader` so `IBotBehavior` types unify — **don't rename it** without updating
   `PluginLoadContext.SharedAssemblyNames`.
-- **`*.Application`** — logic (`BehaviorCatalog`, `BotRegistrationService`, `BotUpdateRouter`, `BotHealthTracker`).
+- **`*.Application`** — logic (`BehaviorCatalog`, `BehaviorExtensionService`, `BotRegistrationService`,
+  `BotUpdateRouter`, `BotHealthTracker`).
 - **`*.Infrastructure`** — external concerns + DI (`AddPlatformModule`): receivers, `BotSupervisor`, per-bot
-  clients, admin API, security, plugin loader/store, the bot-scope filter, `PlatformOptions`.
+  clients, admin API, security, the extension loader and the two `IExtensionStore` implementations, the
+  bot-scope filter, `PlatformOptions`.
 - **`*.Persistence`** — the `platform` Postgres schema: `PlatformDbContext` (also holds the Data Protection key
   ring), `PostgresBotRegistry`, migrations. Wired via `AddPlatformPersistence()`, called by `AddPlatformModule()`.
 - **`WebApi`** — the host. Composes everything, registers built-in behaviors + reloads saved extensions, maps the
@@ -76,9 +78,25 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
 
 - The bot registry (`platform.Bots`) is **durable**; `BotRestoreHostedService` restarts every non-disabled bot on
   startup. Schema changes go through per-context EF migrations against `PlatformDbContext` (see the command table).
+- **Behavior extension packages are durable too**, behind `IExtensionStore`: `FileSystemExtensionStore` over
+  `Platform:PluginsDirectory` by default, `S3ExtensionStore` when `Platform:PluginsBucket` is set (ECS, where
+  local disk is ephemeral). `BehaviorExtensionService` owns upload/replace/remove/restore; it restores every
+  stored package before the host serves, and **aborts startup** if the store cannot be read within
+  `Platform:ExtensionStoreStartupTimeout` rather than running with an incomplete catalog. That budget is one
+  deadline shared by the listing and every package read, so the delay does not scale with package count. A
+  single unloadable package is logged, skipped, and reported via `GET /admin/behaviors`.
+- **Package names are validated in both directions**, by `ExtensionPackageName`. On the way in, `Validate`
+  *normalises* (a client's `filename=` may carry a full path — backslashes are folded first so the result
+  never depends on the host OS). On the way back out of a store, `ValidateStored` *refuses* anything it would
+  have to rewrite: a tidied name would no longer address the object the store actually holds.
 - **Bot tokens are encrypted at rest** via `ITokenProtector` (Data Protection, key ring in
-  `platform.DataProtectionKeys`) — never stored in plaintext, never logged. `TelegramBotTokenValidator` logs only
-  an exception's type/message, never the full exception, since the token is in the request URI.
+  `platform.DataProtectionKeys`) — never stored in plaintext, never logged. Keeping the "never logged" half true
+  takes two deliberate measures, because the token travels in the Telegram request **path**
+  (`api.telegram.org/bot{token}/getMe`): `TelegramBotTokenValidator` logs only an exception's type/message,
+  never the full exception; and `AddTelegramHttpClients()` calls `RemoveAllLoggers()` on both named clients,
+  since `IHttpClientFactory`'s default handlers log the request URI at Information level. **Do not re-enable
+  logging on those clients** — it publishes every bot's credential to the log sink on every call.
+  `TelegramHttpClientLoggingTests` fails if either measure is dropped.
 - The admin API is authenticated by a static `Platform:AdminApiKey` (constant-time compared) on every request, and
   is separate from the end-user Telegram surface. Webhook secret tokens are HMAC-derived from the admin key per bot.
 
@@ -86,6 +104,11 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
 
 - **Result, not exceptions, for expected failures.** Public methods that can fail return `FluentResults.Result<T>`;
   check `.IsFailed` / `.Errors.First().Message`. Reserve `throw` for programmer errors / invariants.
+  When a caller has to *act* on which failure it was, give the failure a type rather than a recognisable
+  phrase — see `ExtensionErrors.cs` (`StoreUnavailableError`, `PackageNotFoundError`,
+  `ExtensionConflictError`, `BehaviorInUseError`), which is how `AdminEndpoints.MapFailure` picks a status
+  code and how startup decides an unreachable store is fatal. The bot endpoints still classify on message
+  text; that is the older path, not the one to copy.
 - **DI registration uses C# extension members** (not classic extension methods):
   ```csharp
   public static class ServiceInstaller
@@ -115,6 +138,12 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
 Implement `IBotBehavior` in a class library that references only `TelegramBotPlatform.Public`, build it, and upload
 the DLL via `POST /admin/behaviors`. See [samples/ReverseBehavior](samples/ReverseBehavior). A behavior that itself
 needs the bus would add its consumers in the host's `AddPlatformMessaging`.
+
+`POST` is create-only (a stored name returns 409). Ship a new build with `PUT /admin/behaviors/{packageName}` —
+it hot-swaps the behaviors for running bots, and rolls back completely if the new build fails to load. Retire one
+with `DELETE /admin/behaviors/{packageName}`, which is refused while a registered bot is still assigned to any of
+its behaviors. `BehaviorCatalog`'s per-source operations are atomic (immutable snapshot behind a write lock), so a
+multi-key package is never observed half-swapped.
 
 ## Tests
 

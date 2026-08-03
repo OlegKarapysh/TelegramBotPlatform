@@ -47,8 +47,9 @@ src/TelegramBotPlatform.WebApi/plugins/
 .specify/*
 specs/
 
-# Terraform (infra/terraform) — never commit state or secret var files; DO commit the lock file
+# Terraform (infra/terraform) — never commit state, secret var files, or the provider lock
 **/.terraform/*
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 crash.log
