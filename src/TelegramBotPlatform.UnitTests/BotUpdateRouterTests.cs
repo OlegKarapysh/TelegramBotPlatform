@@ -86,7 +86,7 @@ public class BotUpdateRouterTests
             catalog,
             clientRegistry,
             new ServiceCollection().BuildServiceProvider(),
-            new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance),
+            new BotHealthTracker(registry, new BotFailureCounter(), NullLogger<BotHealthTracker>.Instance),
             NullLogger<BotUpdateRouter>.Instance);
 
         var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, SampleUpdate, TestContext.Current.CancellationToken));
@@ -100,7 +100,7 @@ public class BotUpdateRouterTests
             catalog,
             new FakeBotClientRegistry(),
             new ServiceCollection().BuildServiceProvider(),
-            new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance),
+            new BotHealthTracker(registry, new BotFailureCounter(), NullLogger<BotHealthTracker>.Instance),
             NullLogger<BotUpdateRouter>.Instance);
 
     private static BotRegistration Registration(long id, string behaviorKey) =>

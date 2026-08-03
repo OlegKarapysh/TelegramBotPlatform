@@ -6,15 +6,14 @@ namespace TelegramBotPlatform.Application;
 /// auto-disable; the operator decides whether to disable/rotate/remove. A later success clears the flag
 /// back to <see cref="BotStatus.Active"/>. Never touches a bot the operator has explicitly disabled.
 /// </summary>
-public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealthTracker> logger)
+public sealed class BotHealthTracker(
+    IBotRegistry botRegistry, BotFailureCounter failureCounter, ILogger<BotHealthTracker> logger)
 {
     public const int FailureThreshold = 3;
 
-    private readonly ConcurrentDictionary<long, int> _consecutiveFailures = new();
-
     public async Task RecordFailure(long botId, CancellationToken cancellationToken = default)
     {
-        var failures = _consecutiveFailures.AddOrUpdate(botId, 1, (_, count) => count + 1);
+        var failures = failureCounter.Increment(botId);
         if (failures < FailureThreshold)
         {
             return;
@@ -35,8 +34,7 @@ public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealth
 
     public async Task RecordSuccess(long botId, CancellationToken cancellationToken = default)
     {
-        var hadFailures = _consecutiveFailures.TryRemove(botId, out var previousCount) && previousCount > 0;
-        if (!hadFailures)
+        if (!failureCounter.Clear(botId))
         {
             return;
         }

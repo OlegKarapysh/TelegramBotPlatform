@@ -43,3 +43,11 @@ app.MapAdminApi();
 app.MapBotWebhook();
 
 await app.RunAsync();
+
+/// <summary>
+/// Makes this file's top-level statements addressable as a type, so the integration tests can boot
+/// <em>this</em> entry point through <c>WebApplicationFactory&lt;Program&gt;</c> — composition root,
+/// startup ordering and all — instead of re-composing the host themselves. The compiler otherwise emits
+/// the generated <c>Program</c> class as internal.
+/// </summary>
+public partial class Program;

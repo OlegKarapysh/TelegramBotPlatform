@@ -30,6 +30,9 @@ public static class ServiceInstaller
 
             services.AddSingleton<IBehaviorCatalog, BehaviorCatalog>();
             services.AddScoped<BotRegistrationService>();
+            // The tracker is scoped because it reads and writes the scoped registry, and every update is
+            // consumed in its own scope. Its counts therefore cannot live on it — see BotFailureCounter.
+            services.AddSingleton<BotFailureCounter>();
             services.AddScoped<BotHealthTracker>();
 
             services.AddSingleton<WebhookSecretProvider>();

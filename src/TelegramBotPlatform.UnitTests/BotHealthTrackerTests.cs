@@ -12,7 +12,7 @@ public class BotHealthTrackerTests
     {
         var registry = new FakeBotRegistry();
         registry.Seed(Registration(1, BotStatus.Active));
-        var tracker = new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance);
+        var tracker = CreateTracker(registry);
 
         for (var i = 0; i < BotHealthTracker.FailureThreshold - 1; i++)
         {
@@ -27,7 +27,7 @@ public class BotHealthTrackerTests
     {
         var registry = new FakeBotRegistry();
         registry.Seed(Registration(1, BotStatus.Active));
-        var tracker = new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance);
+        var tracker = CreateTracker(registry);
 
         for (var i = 0; i < BotHealthTracker.FailureThreshold; i++)
         {
@@ -42,7 +42,7 @@ public class BotHealthTrackerTests
     {
         var registry = new FakeBotRegistry();
         registry.Seed(Registration(1, BotStatus.Disabled));
-        var tracker = new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance);
+        var tracker = CreateTracker(registry);
 
         for (var i = 0; i < BotHealthTracker.FailureThreshold + 5; i++)
         {
@@ -57,7 +57,7 @@ public class BotHealthTrackerTests
     {
         var registry = new FakeBotRegistry();
         registry.Seed(Registration(1, BotStatus.Active));
-        var tracker = new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance);
+        var tracker = CreateTracker(registry);
         for (var i = 0; i < BotHealthTracker.FailureThreshold; i++)
         {
             await tracker.RecordFailure(1, TestContext.Current.CancellationToken);
@@ -75,7 +75,7 @@ public class BotHealthTrackerTests
     {
         var registry = new FakeBotRegistry();
         registry.Seed(Registration(1, BotStatus.Active));
-        var tracker = new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance);
+        var tracker = CreateTracker(registry);
 
         await tracker.RecordSuccess(1, TestContext.Current.CancellationToken);
 
@@ -88,7 +88,7 @@ public class BotHealthTrackerTests
         var registry = new FakeBotRegistry();
         registry.Seed(Registration(1, BotStatus.Active));
         registry.Seed(Registration(2, BotStatus.Active));
-        var tracker = new BotHealthTracker(registry, NullLogger<BotHealthTracker>.Instance);
+        var tracker = CreateTracker(registry);
 
         for (var i = 0; i < BotHealthTracker.FailureThreshold; i++)
         {
@@ -98,6 +98,27 @@ public class BotHealthTrackerTests
         Assert.Equal(BotStatus.Failing, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
         Assert.Equal(BotStatus.Active, (await registry.Get(2, TestContext.Current.CancellationToken))!.Status);
     }
+
+    [Fact]
+    public async Task RecordFailure_Accumulates_AcrossTrackerInstances()
+    {
+        var registry = new FakeBotRegistry();
+        registry.Seed(Registration(1, BotStatus.Active));
+        var counter = new BotFailureCounter();
+
+        // The platform resolves a tracker per update, in that update's own DI scope. So the count has to
+        // live in the shared counter and not on the tracker: counting on the tracker leaves every other
+        // test here passing while making Failing unreachable in the running host.
+        for (var i = 0; i < BotHealthTracker.FailureThreshold; i++)
+        {
+            await CreateTracker(registry, counter).RecordFailure(1, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(BotStatus.Failing, (await registry.Get(1, TestContext.Current.CancellationToken))!.Status);
+    }
+
+    private static BotHealthTracker CreateTracker(IBotRegistry registry, BotFailureCounter? counter = null) =>
+        new(registry, counter ?? new BotFailureCounter(), NullLogger<BotHealthTracker>.Instance);
 
     private static BotRegistration Registration(long id, BotStatus status) =>
         new(id, TelegramBotId: 1000 + id, Username: "bot", Label: "Bot", "echo", status, DateTime.UtcNow, DateTime.UtcNow);
