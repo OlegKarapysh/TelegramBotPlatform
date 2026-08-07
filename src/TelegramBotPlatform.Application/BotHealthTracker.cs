@@ -4,17 +4,18 @@ namespace TelegramBotPlatform.Application;
 /// Tracks per-bot update-handling health. After repeated consecutive failures a bot is marked
 /// <see cref="BotStatus.Failing"/> while its receiver keeps running at normal cadence — no backoff, no
 /// auto-disable; the operator decides whether to disable/rotate/remove. A later success clears the flag
-/// back to <see cref="BotStatus.Active"/>. Never touches a bot the operator has explicitly disabled.
+/// back to <see cref="BotStatus.Active"/>, including a success in a <em>later process</em> than the one
+/// that set it — the flag is durable, so clearing it must not depend on in-memory counts that are not.
+/// Never touches a bot the operator has explicitly disabled.
 /// </summary>
-public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealthTracker> logger)
+public sealed class BotHealthTracker(
+    IBotRegistry botRegistry, BotFailureCounter failureCounter, ILogger<BotHealthTracker> logger)
 {
     public const int FailureThreshold = 3;
 
-    private readonly ConcurrentDictionary<long, int> _consecutiveFailures = new();
-
     public async Task RecordFailure(long botId, CancellationToken cancellationToken = default)
     {
-        var failures = _consecutiveFailures.AddOrUpdate(botId, 1, (_, count) => count + 1);
+        var failures = failureCounter.Increment(botId);
         if (failures < FailureThreshold)
         {
             return;
@@ -35,8 +36,9 @@ public sealed class BotHealthTracker(IBotRegistry botRegistry, ILogger<BotHealth
 
     public async Task RecordSuccess(long botId, CancellationToken cancellationToken = default)
     {
-        var hadFailures = _consecutiveFailures.TryRemove(botId, out var previousCount) && previousCount > 0;
-        if (!hadFailures)
+        // Asks the counter, not itself, whether the persisted status is worth a look: a bot can be
+        // Failing on record with no in-memory streak behind it, which is what every restart produces.
+        if (!failureCounter.RecordSuccess(botId))
         {
             return;
         }

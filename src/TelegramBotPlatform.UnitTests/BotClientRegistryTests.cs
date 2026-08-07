@@ -1,17 +1,18 @@
-using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using TelegramBotPlatform.Infrastructure.Bots;
 
 namespace TelegramBotPlatform.UnitTests;
 
-public class BotClientRegistryTests
+public sealed class BotClientRegistryTests
 {
     [Fact]
     public void Get_Throws_WhenNoClientRegistered()
     {
         var registry = CreateRegistry();
 
-        Assert.Throws<InvalidOperationException>(() => registry.Get(botId: 1));
+        var get = () => registry.Get(botId: 1);
+
+        Assert.Throws<InvalidOperationException>(get);
     }
 
     [Fact]
@@ -29,7 +30,9 @@ public class BotClientRegistryTests
     {
         var registry = CreateRegistry();
 
-        Assert.False(registry.TryGet(botId: 999, out var client));
+        var found = registry.TryGet(botId: 999, out var client);
+
+        Assert.False(found);
         Assert.Null(client);
     }
 
@@ -59,7 +62,7 @@ public class BotClientRegistryTests
     {
         var services = new ServiceCollection();
         services.AddHttpClient();
-        var httpClientFactory = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
-        return new BotClientRegistry(httpClientFactory);
+
+        return new BotClientRegistry(services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>());
     }
 }

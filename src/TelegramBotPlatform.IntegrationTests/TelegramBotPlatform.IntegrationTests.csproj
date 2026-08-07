@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <OutputType>Exe</OutputType>
+        <RootNamespace>TelegramBotPlatform.IntegrationTests</RootNamespace>
+        <TargetFramework>net10.0</TargetFramework>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="Xunit"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="xunit.v3.mtp-v2" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The host itself: these tests boot its real Program, not a re-composition of it. -->
+        <ProjectReference Include="..\TelegramBotPlatform.WebApi\TelegramBotPlatform.WebApi.csproj" />
+        <!--
+          A real, separately-compiled behavior extension. Referenced only so MSBuild builds it and drops
+          ReverseBehavior.dll in this project's output — the extension tests upload those bytes through the
+          admin API and let the real collectible-AssemblyLoadContext loader load them. Nothing here
+          references its types; see SamplePlugin.
+        -->
+        <ProjectReference Include="..\..\samples\ReverseBehavior\ReverseBehavior.csproj" />
+    </ItemGroup>
+
+</Project>

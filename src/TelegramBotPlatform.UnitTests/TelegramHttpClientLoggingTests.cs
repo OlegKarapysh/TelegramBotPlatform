@@ -10,7 +10,7 @@ namespace TelegramBotPlatform.UnitTests;
 /// credential to the log sink on every call. These tests hold the line on that, driving a real client
 /// through a stub handler (no network) and asserting the token never reaches a logger.
 /// </summary>
-public class TelegramHttpClientLoggingTests
+public sealed class TelegramHttpClientLoggingTests
 {
     private const string Token = "123456:SUPER-SECRET-BOT-TOKEN";
 
@@ -20,22 +20,9 @@ public class TelegramHttpClientLoggingTests
     public async Task TelegramHttpClients_DoNotLogTheRequestUri_WhichCarriesTheBotToken(string clientName)
     {
         var sink = new CapturingLoggerProvider();
+        var client = CreateClient(clientName, sink, services => services.AddTelegramHttpClients());
 
-        var services = new ServiceCollection();
-        services.AddLogging(logging =>
-        {
-            logging.SetMinimumLevel(LogLevel.Trace);
-            logging.AddProvider(sink);
-        });
-        services.AddTelegramHttpClients();
-        // Swap in a stub so the test never leaves the process; this does not alter the logging setup.
-        services.AddHttpClient(clientName).ConfigurePrimaryHttpMessageHandler(() => new StubHandler());
-
-        var provider = services.BuildServiceProvider();
-        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(clientName);
-
-        await client.GetAsync(
-            new Uri($"https://api.telegram.org/bot{Token}/getMe"), TestContext.Current.CancellationToken);
+        await CallGetMe(client);
 
         Assert.DoesNotContain(sink.Messages, message => message.Contains(Token, StringComparison.Ordinal));
     }
@@ -45,22 +32,32 @@ public class TelegramHttpClientLoggingTests
     {
         // Guards the guard: if RemoveAllLoggers were dropped, the assertion above must actually fail.
         var sink = new CapturingLoggerProvider();
+        var client = CreateClient("unprotected", sink);
 
+        await CallGetMe(client);
+
+        Assert.Contains(sink.Messages, message => message.Contains(Token, StringComparison.Ordinal));
+    }
+
+    private static Task<HttpResponseMessage> CallGetMe(HttpClient client) =>
+        client.GetAsync(new Uri($"https://api.telegram.org/bot{Token}/getMe"), TestContext.Current.CancellationToken);
+
+    private static HttpClient CreateClient(
+        string clientName, ILoggerProvider sink, Action<IServiceCollection>? configure = null)
+    {
         var services = new ServiceCollection();
         services.AddLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Trace);
             logging.AddProvider(sink);
         });
-        services.AddHttpClient("unprotected").ConfigurePrimaryHttpMessageHandler(() => new StubHandler());
 
-        var provider = services.BuildServiceProvider();
-        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient("unprotected");
+        configure?.Invoke(services);
 
-        await client.GetAsync(
-            new Uri($"https://api.telegram.org/bot{Token}/getMe"), TestContext.Current.CancellationToken);
+        // A stub primary handler keeps the call inside the process; it does not alter the logging setup.
+        services.AddHttpClient(clientName).ConfigurePrimaryHttpMessageHandler(() => new StubHandler());
 
-        Assert.Contains(sink.Messages, message => message.Contains(Token, StringComparison.Ordinal));
+        return services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>().CreateClient(clientName);
     }
 
     private sealed class StubHandler : HttpMessageHandler

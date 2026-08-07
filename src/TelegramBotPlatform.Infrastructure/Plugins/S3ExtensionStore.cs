@@ -31,7 +31,12 @@ public sealed class S3ExtensionStore(IAmazonS3 s3, IOptions<PlatformOptions> pla
                     },
                     cancellationToken);
 
-                names.AddRange(response.S3Objects
+                // S3Objects is null, not empty, when the listing matched nothing: the v4 SDK leaves
+                // collection properties uninitialised. Enumerating it directly turns an empty store into
+                // an ArgumentNullException, which the catch below reports as an unreachable store — and
+                // startup treats *that* as fatal. An empty store is not a fault; it is the state every
+                // deployment begins in.
+                names.AddRange((response.S3Objects ?? [])
                     .Select(s3Object => s3Object.Key[Prefix.Length..])
                     .Where(name => name.Length > 0 && name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)));
 

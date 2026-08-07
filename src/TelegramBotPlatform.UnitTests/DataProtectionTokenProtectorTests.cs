@@ -5,7 +5,7 @@ using TelegramBotPlatform.Infrastructure.Security;
 
 namespace TelegramBotPlatform.UnitTests;
 
-public class DataProtectionTokenProtectorTests
+public sealed class DataProtectionTokenProtectorTests
 {
     [Fact]
     public void Protect_ThenUnprotect_RoundTripsTheOriginalToken()
@@ -33,9 +33,10 @@ public class DataProtectionTokenProtectorTests
     private static DataProtectionTokenProtector CreateProtector()
     {
         var services = new ServiceCollection();
-        // Ephemeral: keys live only in memory for this test run — no real filesystem I/O (test purity).
+        // Ephemeral: the key ring lives in memory for this run only, so the test does no filesystem I/O.
         services.AddDataProtection().UseEphemeralDataProtectionProvider();
-        var provider = services.BuildServiceProvider().GetRequiredService<IDataProtectionProvider>();
-        return new DataProtectionTokenProtector(provider);
+
+        return new DataProtectionTokenProtector(
+            services.BuildServiceProvider().GetRequiredService<IDataProtectionProvider>());
     }
 }

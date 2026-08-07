@@ -3,15 +3,9 @@ using TelegramBotPlatform.Public.Behaviors;
 
 namespace TelegramBotPlatform.UnitTests;
 
-public class BehaviorCatalogTests
+public sealed class BehaviorCatalogTests
 {
-    private sealed class FakeBehavior(string key, string contractVersion = "1.0") : IBotBehavior
-    {
-        public string Key { get; } = key;
-        public string DisplayName => $"Fake:{Key}";
-        public string ContractVersion { get; } = contractVersion;
-        public Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken) => Task.CompletedTask;
-    }
+    private const string Source = "extension:Pkg.dll";
 
     [Fact]
     public void Register_Succeeds_ForNewKey()
@@ -35,6 +29,17 @@ public class BehaviorCatalogTests
 
         Assert.True(result.IsFailed);
         Assert.Contains("already registered", result.Errors.First().Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Register_Fails_WhenKeyBelongsToAnExtensionSource()
+    {
+        var catalog = new BehaviorCatalog();
+        catalog.ReplaceSource("extension:Reverse.dll", [new FakeBehavior("reverse")]);
+
+        var result = catalog.Register(new FakeBehavior("reverse"), "built-in");
+
+        Assert.True(result.IsFailed);
     }
 
     [Fact]
@@ -62,7 +67,9 @@ public class BehaviorCatalogTests
     {
         var catalog = new BehaviorCatalog();
 
-        Assert.False(catalog.TryGet("missing", out var behavior));
+        var found = catalog.TryGet("missing", out var behavior);
+
+        Assert.False(found);
         Assert.Null(behavior);
     }
 
@@ -76,8 +83,8 @@ public class BehaviorCatalogTests
         var descriptors = catalog.List();
 
         Assert.Equal(2, descriptors.Count);
-        Assert.Contains(descriptors, d => d.Key == "echo" && d.Source == "built-in");
-        Assert.Contains(descriptors, d => d.Key == "reverse" && d.Source == "extension:Reverse.dll");
+        Assert.Contains(descriptors, descriptor => descriptor is { Key: "echo", Source: "built-in" });
+        Assert.Contains(descriptors, descriptor => descriptor is { Key: "reverse", Source: "extension:Reverse.dll" });
     }
 
     [Fact]
@@ -87,7 +94,9 @@ public class BehaviorCatalogTests
         catalog.Register(new FakeBehavior("echo"), "built-in");
         catalog.ReplaceSource("extension:Reverse.dll", [new FakeBehavior("reverse"), new FakeBehavior("reverse-words")]);
 
-        Assert.Equal(["reverse", "reverse-words"], catalog.KeysFromSource("extension:Reverse.dll"));
+        var extensionKeys = catalog.KeysFromSource("extension:Reverse.dll");
+
+        Assert.Equal(["reverse", "reverse-words"], extensionKeys);
         Assert.Equal(["echo"], catalog.KeysFromSource("built-in"));
         Assert.Empty(catalog.KeysFromSource("extension:Unknown.dll"));
     }
@@ -143,7 +152,7 @@ public class BehaviorCatalogTests
         Assert.True(result.IsFailed);
         Assert.False(catalog.TryGet("fine", out _));
         Assert.Equal(["reverse"], catalog.KeysFromSource("extension:Reverse.dll"));
-        Assert.Equal("built-in", catalog.List().Single(d => d.Key == "echo").Source);
+        Assert.Equal("built-in", catalog.List().Single(descriptor => descriptor.Key == "echo").Source);
     }
 
     [Fact]
@@ -192,18 +201,95 @@ public class BehaviorCatalogTests
         var catalog = new BehaviorCatalog();
         catalog.Register(new FakeBehavior("echo"), "built-in");
 
-        Assert.True(catalog.RemoveSource("extension:Never.dll").IsSuccess);
+        var result = catalog.RemoveSource("extension:Never.dll");
+
+        Assert.True(result.IsSuccess);
         Assert.Single(catalog.List());
     }
 
     [Fact]
-    public void Register_Fails_WhenKeyBelongsToAnExtensionSource()
+    public async Task ASourcesKeySet_IsNeverObservedHalfSwapped()
     {
+        // Every other test here drives the catalog from one thread, where an in-place dictionary would
+        // behave identically. Replacing a package's keys has to be one visible transition, or an update
+        // arriving mid-swap routes on a key set that never existed.
         var catalog = new BehaviorCatalog();
-        catalog.ReplaceSource("extension:Reverse.dll", [new FakeBehavior("reverse")]);
+        string[] before = ["a", "b", "c"];
+        string[] after = ["d", "e", "f", "g"];
+        catalog.ReplaceSource(Source, [.. before.Select(key => new FakeBehavior(key))]);
+        var torn = new List<string>();
 
-        var result = catalog.Register(new FakeBehavior("reverse"), "built-in");
+        using var deadline = Deadline();
+        await Task.WhenAll(
+            Race(deadline.Token, () =>
+            {
+                catalog.ReplaceSource(Source, [.. after.Select(key => new FakeBehavior(key))]);
+                catalog.ReplaceSource(Source, [.. before.Select(key => new FakeBehavior(key))]);
+            }),
+            Race(deadline.Token, () =>
+            {
+                var observed = catalog.KeysFromSource(Source);
 
-        Assert.True(result.IsFailed);
+                if (!observed.SequenceEqual(before) && !observed.SequenceEqual(after))
+                {
+                    torn.Add(string.Join(",", observed));
+                }
+            }));
+
+        Assert.True(torn.Count == 0, $"Observed {torn.Count} half-applied key set(s), e.g. [{torn.FirstOrDefault()}].");
+    }
+
+    [Fact]
+    public async Task Reading_NeverFaults_WhileTheCatalogIsBeingWritten()
+    {
+        // TryGet is on the path of every update and List backs the admin API; neither takes the write
+        // lock, which is only safe because what they read is immutable once published.
+        var catalog = new BehaviorCatalog();
+        catalog.Register(new FakeBehavior("echo"), "built-in");
+        var generation = 0;
+
+        using var deadline = Deadline();
+        await Task.WhenAll(
+            Race(deadline.Token, () =>
+            {
+                catalog.ReplaceSource(Source, [new FakeBehavior($"key-{generation++ % 8}")]);
+                catalog.RemoveSource(Source);
+            }),
+            Race(deadline.Token, () =>
+            {
+                catalog.List();
+                catalog.TryGet("echo", out _);
+            }));
+
+        Assert.True(catalog.TryGet("echo", out _));
+    }
+
+    /// <summary>Repeats <paramref name="iteration"/> on its own thread until the deadline passes.</summary>
+    private static Task Race(CancellationToken deadline, Action iteration) =>
+        Task.Run(
+            () =>
+            {
+                while (!deadline.IsCancellationRequested)
+                {
+                    iteration();
+                }
+            },
+            TestContext.Current.CancellationToken);
+
+    /// <summary>Short: a torn read shows up within the first handful of the millions of iterations this allows.</summary>
+    private static CancellationTokenSource Deadline()
+    {
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(500));
+
+        return deadline;
+    }
+
+    private sealed class FakeBehavior(string key, string contractVersion = "1.0") : IBotBehavior
+    {
+        public string Key { get; } = key;
+        public string DisplayName => $"Fake:{Key}";
+        public string ContractVersion { get; } = contractVersion;
+        public Task HandleUpdate(IBotUpdateContext context, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

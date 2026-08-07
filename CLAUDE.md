@@ -26,7 +26,8 @@ All commands run from the repo root and require the **.NET 10 SDK**.
 | Build (Debug) | `dotnet build TelegramBotPlatform.slnx` |
 | Build (Release, as CI does) | `dotnet build TelegramBotPlatform.slnx -c Release` |
 | Run all tests | `dotnet test --solution TelegramBotPlatform.slnx` |
-| Run one project's tests | `dotnet test --project src/TelegramBotPlatform.UnitTests/TelegramBotPlatform.UnitTests.csproj` |
+| Run only the unit tests | `dotnet test --project src/TelegramBotPlatform.UnitTests/TelegramBotPlatform.UnitTests.csproj` |
+| Run only the integration tests | `dotnet test --project src/TelegramBotPlatform.IntegrationTests/TelegramBotPlatform.IntegrationTests.csproj` |
 | Format | `dotnet format TelegramBotPlatform.slnx` |
 | Run the host | `dotnet run --project src/TelegramBotPlatform.WebApi` |
 | Apply migrations | `dotnet run --project src/TelegramBotPlatform.WebApi -- migrate` |
@@ -55,8 +56,21 @@ A MassTransit consume filter (`BotScopeFilter<T>`, applied to every `IBotScopedM
 scoped `IBotContext` **before** the consumer is constructed, so a constructor-injected `ITelegramBotClient` resolves
 to *that* bot's client. `BotSupervisor` owns each bot's receiver lifecycle (start/stop/rotate/remove) and is the
 only thing `BotRegistrationService` touches to bring a bot up or down (via the `IBotLifecycle` seam, keeping
-Application free of an Infrastructure reference). `BotHealthTracker` marks a repeatedly-failing bot `Failing` while
-keeping it running at normal cadence (no backoff, no auto-disable), and clears it on the next success.
+Application free of an Infrastructure reference). Starting a receiver is the one step that can fail *after* the
+registry has been written — it is a live `setWebhook` — so `Register` and `Enable` undo their own registry write
+when it does, and report a `Result` failure rather than letting the exception escape as a 500 with a
+half-registered bot behind it. `RotateToken` deliberately does not roll back: the superseded token may already be
+revoked, so the new one is kept and the refusal says the receiver still needs bringing up.
+
+`BotHealthTracker` marks a repeatedly-failing bot `Failing` while keeping it running at normal cadence (no
+backoff, no auto-disable), and clears it on the next success. It is **scoped** (it reads/writes the scoped
+`IBotRegistry`) and every update is consumed in its own scope, so its consecutive-failure counts live in the
+singleton `BotFailureCounter` — counting on the tracker itself makes `Failing` unreachable in the running host
+while every unit test that reuses one tracker still passes. `Failing` is *durable* but the counts are not, which
+is why `BotFailureCounter.RecordSuccess` also answers true on the **first** success it sees for a bot: without
+that, a bot left `Failing` by a previous process stays flagged for as long as it keeps working, because there is
+no in-memory streak to break. The same counter is cleared (`Forget`) on disable/remove, so a bot brought back
+does not inherit the streak it went down with.
 
 ### Layers (strict dependency direction)
 
@@ -65,7 +79,7 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
   `ExtensionAssemblyLoader` so `IBotBehavior` types unify — **don't rename it** without updating
   `PluginLoadContext.SharedAssemblyNames`.
 - **`*.Application`** — logic (`BehaviorCatalog`, `BehaviorExtensionService`, `BotRegistrationService`,
-  `BotUpdateRouter`, `BotHealthTracker`).
+  `BotUpdateRouter`, `BotHealthTracker` + `BotFailureCounter`).
 - **`*.Infrastructure`** — external concerns + DI (`AddPlatformModule`): receivers, `BotSupervisor`, per-bot
   clients, admin API, security, the extension loader and the two `IExtensionStore` implementations, the
   bot-scope filter, `PlatformOptions`.
@@ -86,9 +100,12 @@ keeping it running at normal cadence (no backoff, no auto-disable), and clears i
   deadline shared by the listing and every package read, so the delay does not scale with package count. A
   single unloadable package is logged, skipped, and reported via `GET /admin/behaviors`.
 - **Package names are validated in both directions**, by `ExtensionPackageName`. On the way in, `Validate`
-  *normalises* (a client's `filename=` may carry a full path — backslashes are folded first so the result
-  never depends on the host OS). On the way back out of a store, `ValidateStored` *refuses* anything it would
-  have to rewrite: a tidied name would no longer address the object the store actually holds.
+  *normalises* (a client's `filename=` may carry a full path). It strips everything up to the last `/` or `\`
+  **itself** rather than calling `Path.GetFileName`, which is OS-aware in more ways than the separator it
+  recognises — on Windows it also strips a drive-relative prefix, so `C:evil.dll` came back as the valid
+  `evil.dll` there and unchanged (then rejected on the `:`) on Linux. Keep the strip OS-blind; the same upload
+  must not be accepted locally and refused in CI. On the way back out of a store, `ValidateStored` *refuses*
+  anything it would have to rewrite: a tidied name would no longer address the object the store actually holds.
 - **Bot tokens are encrypted at rest** via `ITokenProtector` (Data Protection, key ring in
   `platform.DataProtectionKeys`) — never stored in plaintext, never logged. Keeping the "never logged" half true
   takes two deliberate measures, because the token travels in the Telegram request **path**
@@ -147,13 +164,67 @@ multi-key package is never observed half-swapped.
 
 ## Tests
 
-Pure xUnit v3 on **Microsoft.Testing.Platform** (MTP) — test projects are executables (`<OutputType>Exe</OutputType>`)
-referencing `xunit.v3.mtp-v2`; MTP mode is set in [global.json](global.json). Because of MTP mode, pass the target
-explicitly: `dotnet test --solution TelegramBotPlatform.slnx` or `--project <test>.csproj`.
+Two projects, both xUnit v3 on **Microsoft.Testing.Platform** (MTP) — test projects are executables
+(`<OutputType>Exe</OutputType>`) referencing `xunit.v3.mtp-v2`; MTP mode is set in [global.json](global.json).
+Because of MTP mode, pass the target explicitly: `dotnet test --solution TelegramBotPlatform.slnx` or
+`--project <test>.csproj`. Never a mocking library — collaborators are small hand-written fakes.
 
-Keep tests **pure** — no network, Telegram, filesystem, or real database. Replace collaborators with small
-hand-written fakes implementing the interfaces (no mocking library). The one sanctioned exception:
-`PostgresBotRegistryTests` uses the **EF Core in-memory provider** via `InMemoryDbContextFactory`.
+### How a test is written
+
+- **Arrange, act, assert — three blank-line-separated blocks, no `// Arrange` labels.** The names carry
+  that; the blank lines carry the shape. **One act per test**: if a test needs a second act to make its
+  point, it is two tests. And **assertions only in the last block** — a check in the arrange block is a
+  setup guard, and belongs behind an `...Ok` helper instead (see below).
+- **Setup that must not fail says so, without asserting**: `RegisterBotOk`, `GetBotOk`, `UploadBehaviorOk`,
+  `DisableBotOk`, `EnableBotOk`, `RotateTokenOk`, `RemoveBotOk`, `RemoveBehaviorOk` on `AdminApi`, and
+  `HostedBot.DeliverOk`. Each fails the test with the response body quoted if the call did not do what the
+  arrange assumed. The bare `DisableBot`/`Deliver`/… variants are for when the *response itself* is what
+  the test is about.
+- **Comments earn their place or go.** Keep the class-level `<summary>` saying what the file is for, and
+  keep a comment that records a real past bug ("Regression: …") or a why that is not on the screen. Delete
+  anything that restates the assertion below it — the test name and the assertion are the description.
+- Test classes are `sealed`, like everything else here.
+
+### `TelegramBotPlatform.UnitTests` — one component at a time
+
+Keep them **pure**: no network, Telegram, filesystem, or real database. The one sanctioned exception is
+`PostgresBotRegistryTests`, which uses the **EF Core in-memory provider** via `InMemoryDbContextFactory`.
+
+### `TelegramBotPlatform.IntegrationTests` — the composed host
+
+Boots the **host's real entry point** through `WebApplicationFactory<Program>` (which is why
+[Program.cs](src/TelegramBotPlatform.WebApi/Program.cs) ends with `public partial class Program;`) and drives it
+over HTTP. Everything between the endpoints and the edges is production code — admin API, auth filter,
+MassTransit bus, `BotScopeFilter`, supervisor, catalog, extension service, the collectible-`AssemblyLoadContext`
+loader, `FileSystemExtensionStore`, Data Protection and the EF registry.
+
+Exactly three things are substituted, all at the edges, all in `PlatformTestHost`:
+
+| Substituted | By | Why |
+|---|---|---|
+| Each bot's `ITelegramBotClient` | `RecordingBotClientRegistry` → `RecordingTelegramBotClient` | Telegram is the one true external system; tests assert on the calls the platform *made* — and, via `Clients.FailEvery<TRequest>`, on what it does when Telegram *refuses* one |
+| `IBotTokenValidator` | `ScriptedTokenValidator` (`<id>:<secret>` ⇒ bot `<id>`) | It is a live `getMe` call; the seam exists for exactly this |
+| Npgsql | EF in-memory provider, per `PlatformDatabase` | No Docker in CI; the real `PostgresBotRegistry` and key ring sit on top |
+
+Rules for adding to this project:
+
+- **Prove the composition, not a component.** If a fake collaborator could demonstrate it, it belongs in the
+  unit tests. The payoff assertion is usually a bot: an update goes in, the right reply comes out of the right
+  client. `BotFailureCounter` exists because an integration test caught what six passing unit tests could not.
+- **Never sleep; wait on the condition.** Handing an update to a behavior is the only asynchronous seam (the
+  webhook is answered before the bus delivers). Use `Wait.Until` / `WaitForSentMessages`, which return as soon
+  as the effect lands and report what they were waiting for when they do not.
+- **Assert a negative only after something has provably flowed.** "Nothing was dispatched" is checked by
+  sending a *valid* update afterwards, waiting for its reply, and finding only that one — never by sleeping.
+- **One host per test** (`await using var platform = PlatformTestHost.Start()`), with its own database and its
+  own temp plugins directory, both cleaned up on dispose. A class fixture is only for a class whose tests
+  cannot observe each other (see `AdminApiSecurityTests`). Share a `PlatformDatabase` between two hosts to
+  simulate a restart — see `PlatformRestartTests`.
+- **Extension tests use the real sample assembly** (`samples/ReverseBehavior`, via `SamplePlugin`), because the
+  extension path's correctness depends on reflection, a collectible load context and type identity unifying
+  across it — none of which a stand-in loader exercises.
+- Note that a minimal API **binds parameters before endpoint filters run**, so an auth test must send a body
+  the route can bind or it will get a 400/415 without the filter ever being consulted.
 
 ## Gotchas
 

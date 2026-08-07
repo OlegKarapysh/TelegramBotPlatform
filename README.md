@@ -164,12 +164,21 @@ double-underscore form, e.g. `Platform__AdminApiKey`).
 | Build (Debug) | `dotnet build TelegramBotPlatform.slnx` |
 | Build (Release, as CI) | `dotnet build TelegramBotPlatform.slnx -c Release` |
 | Run all tests | `dotnet test --solution TelegramBotPlatform.slnx` |
+| Run only the unit tests | `dotnet test --project src/TelegramBotPlatform.UnitTests/TelegramBotPlatform.UnitTests.csproj` |
+| Run only the integration tests | `dotnet test --project src/TelegramBotPlatform.IntegrationTests/TelegramBotPlatform.IntegrationTests.csproj` |
 | Format | `dotnet format TelegramBotPlatform.slnx` |
 | Add a migration | `dotnet ef migrations add <Name> --project src/TelegramBotPlatform.Persistence --startup-project src/TelegramBotPlatform.Persistence --context PlatformDbContext` |
 
 The build uses **`TreatWarningsAsErrors`** and **Central Package Management** (versions in
-[Directory.Packages.props](Directory.Packages.props)). Tests are **pure** xUnit v3 on Microsoft.Testing.Platform
-(hand-written fakes + EF Core in-memory provider — no network, LLM, filesystem, or real DB).
+[Directory.Packages.props](Directory.Packages.props)). Everything is xUnit v3 on Microsoft.Testing.Platform,
+with hand-written fakes rather than a mocking library, and needs no Docker, cloud credentials or network:
+
+- **Unit tests** are pure — one component at a time, against fakes (plus the EF Core in-memory provider for
+  the registry).
+- **Integration tests** boot the real host in-process (`WebApplicationFactory<Program>`) and drive it over
+  HTTP: registering bots, delivering Telegram webhooks end to end, and uploading a real behavior extension
+  onto a running platform. Only three things are substituted, all at the edges — Telegram's API, the token
+  check, and Postgres.
 
 ## Deployment
 

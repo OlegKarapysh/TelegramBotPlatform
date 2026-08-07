@@ -1,29 +1,36 @@
+using TelegramBotPlatform.Persistence;
 using TelegramBotPlatform.Persistence.Repositories;
 using TelegramBotPlatform.Public.Bots;
 
 namespace TelegramBotPlatform.UnitTests;
 
-public class PostgresBotRegistryTests
+/// <summary>
+/// The sanctioned exception to "no database in the unit tests": the EF in-memory provider, so the real
+/// repository's own query and change-tracking code is what runs.
+/// </summary>
+public sealed class PostgresBotRegistryTests : IAsyncDisposable
 {
-    private static readonly byte[] Token = "encrypted-token"u8.ToArray();
+    private static readonly byte[] _token = "encrypted-token"u8.ToArray();
+
+    private readonly PlatformDbContext _dbContext = InMemoryDbContextFactory.Create();
 
     [Fact]
-    public async Task GetAsync_ReturnsNull_WhenNotRegistered()
+    public async Task Get_ReturnsNull_WhenNotRegistered()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
+        var registry = CreateRegistry();
 
-        Assert.Null(await registry.Get(botId: 1, TestContext.Current.CancellationToken));
+        var registration = await registry.Get(botId: 1, TestContext.Current.CancellationToken);
+
+        Assert.Null(registration);
     }
 
     [Fact]
-    public async Task AddAsync_ThenGetAsync_ReturnsRegistration()
+    public async Task Add_ThenGet_ReturnsTheRegistration()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
+        var registry = CreateRegistry();
 
         var addResult = await registry.Add(
-            telegramBotId: 111, "echo_bot", "Echo", "echo", Token, TestContext.Current.CancellationToken);
+            telegramBotId: 111, "echo_bot", "Echo", "echo", _token, TestContext.Current.CancellationToken);
 
         Assert.True(addResult.IsSuccess);
         var registration = addResult.Value;
@@ -32,43 +39,38 @@ public class PostgresBotRegistryTests
         Assert.Equal("Echo", registration.Label);
         Assert.Equal("echo", registration.BehaviorKey);
         Assert.Equal(BotStatus.Active, registration.Status);
-
-        var fetched = await registry.Get(registration.Id, TestContext.Current.CancellationToken);
-        Assert.Equal(registration, fetched);
+        Assert.Equal(registration, await registry.Get(registration.Id, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task AddAsync_Fails_WhenTelegramBotIdAlreadyRegistered()
+    public async Task Add_Fails_WhenTelegramBotIdAlreadyRegistered()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        await registry.Add(111, "echo_bot", "Echo", "echo", Token, TestContext.Current.CancellationToken);
+        var registry = CreateRegistry();
+        await Register(registry);
 
-        var result = await registry.Add(111, "echo_bot", "Echo Again", "echo", Token, TestContext.Current.CancellationToken);
+        var result = await registry.Add(111, "echo_bot", "Echo Again", "echo", _token, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
         Assert.Contains("already registered", result.Errors.First().Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task GetEncryptedTokenAsync_ReturnsStoredCiphertext()
+    public async Task GetEncryptedToken_ReturnsStoredCiphertext()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        var registration = (await registry.Add(111, "echo_bot", "Echo", "echo", Token, TestContext.Current.CancellationToken)).Value;
+        var registry = CreateRegistry();
+        var registration = await Register(registry);
 
         var storedToken = await registry.GetEncryptedToken(registration.Id, TestContext.Current.CancellationToken);
 
-        Assert.Equal(Token, storedToken);
+        Assert.Equal(_token, storedToken);
     }
 
     [Fact]
-    public async Task ListAsync_ReturnsAllRegisteredBots()
+    public async Task List_ReturnsAllRegisteredBots()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        await registry.Add(111, "bot_a", "A", "echo", Token, TestContext.Current.CancellationToken);
-        await registry.Add(222, "bot_b", "B", "echo", Token, TestContext.Current.CancellationToken);
+        var registry = CreateRegistry();
+        await Register(registry, telegramBotId: 111);
+        await Register(registry, telegramBotId: 222);
 
         var bots = await registry.List(TestContext.Current.CancellationToken);
 
@@ -76,24 +78,22 @@ public class PostgresBotRegistryTests
     }
 
     [Fact]
-    public async Task UpdateStatusAsync_ChangesStatus()
+    public async Task UpdateStatus_ChangesStatus()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        var registration = (await registry.Add(111, "bot_a", "A", "echo", Token, TestContext.Current.CancellationToken)).Value;
+        var registry = CreateRegistry();
+        var registration = await Register(registry);
 
-        var updateResult = await registry.UpdateStatus(registration.Id, BotStatus.Disabled, TestContext.Current.CancellationToken);
+        var result = await registry.UpdateStatus(registration.Id, BotStatus.Disabled, TestContext.Current.CancellationToken);
 
-        Assert.True(updateResult.IsSuccess);
+        Assert.True(result.IsSuccess);
         var fetched = await registry.Get(registration.Id, TestContext.Current.CancellationToken);
         Assert.Equal(BotStatus.Disabled, fetched!.Status);
     }
 
     [Fact]
-    public async Task UpdateStatusAsync_Fails_WhenBotDoesNotExist()
+    public async Task UpdateStatus_Fails_WhenBotDoesNotExist()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
+        var registry = CreateRegistry();
 
         var result = await registry.UpdateStatus(botId: 999, BotStatus.Disabled, TestContext.Current.CancellationToken);
 
@@ -101,11 +101,10 @@ public class PostgresBotRegistryTests
     }
 
     [Fact]
-    public async Task UpdateTokenAsync_ReplacesToken_WhenTelegramBotIdMatches()
+    public async Task UpdateToken_ReplacesToken_WhenTelegramBotIdMatches()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        var registration = (await registry.Add(111, "bot_a", "A", "echo", Token, TestContext.Current.CancellationToken)).Value;
+        var registry = CreateRegistry();
+        var registration = await Register(registry);
         var newToken = "new-encrypted-token"u8.ToArray();
 
         var result = await registry.UpdateToken(registration.Id, 111, newToken, TestContext.Current.CancellationToken);
@@ -115,24 +114,23 @@ public class PostgresBotRegistryTests
     }
 
     [Fact]
-    public async Task UpdateTokenAsync_Fails_WhenTelegramBotIdDiffers()
+    public async Task UpdateToken_Fails_WhenTelegramBotIdDiffers()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        var registration = (await registry.Add(111, "bot_a", "A", "echo", Token, TestContext.Current.CancellationToken)).Value;
+        var registry = CreateRegistry();
+        var registration = await Register(registry);
 
-        var result = await registry.UpdateToken(registration.Id, 999, "irrelevant"u8.ToArray(), TestContext.Current.CancellationToken);
+        var result = await registry.UpdateToken(
+            registration.Id, 999, "irrelevant"u8.ToArray(), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
         Assert.Contains("different Telegram bot", result.Errors.First().Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task RemoveAsync_DeletesRegistration()
+    public async Task Remove_DeletesTheRegistration()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
-        var registration = (await registry.Add(111, "bot_a", "A", "echo", Token, TestContext.Current.CancellationToken)).Value;
+        var registry = CreateRegistry();
+        var registration = await Register(registry);
 
         var result = await registry.Remove(registration.Id, TestContext.Current.CancellationToken);
 
@@ -141,13 +139,20 @@ public class PostgresBotRegistryTests
     }
 
     [Fact]
-    public async Task RemoveAsync_Fails_WhenBotDoesNotExist()
+    public async Task Remove_Fails_WhenBotDoesNotExist()
     {
-        await using var dbContext = InMemoryDbContextFactory.Create();
-        var registry = new PostgresBotRegistry(dbContext);
+        var registry = CreateRegistry();
 
         var result = await registry.Remove(botId: 999, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
     }
+
+    public ValueTask DisposeAsync() => _dbContext.DisposeAsync();
+
+    private PostgresBotRegistry CreateRegistry() => new(_dbContext);
+
+    private static async Task<BotRegistration> Register(PostgresBotRegistry registry, long telegramBotId = 111) =>
+        (await registry.Add(
+            telegramBotId, "echo_bot", "Echo", "echo", _token, TestContext.Current.CancellationToken)).Value;
 }

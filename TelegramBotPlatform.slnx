@@ -14,6 +14,7 @@
     <Project Path="src/TelegramBotPlatform.Infrastructure/TelegramBotPlatform.Infrastructure.csproj" />
     <Project Path="src/TelegramBotPlatform.Persistence/TelegramBotPlatform.Persistence.csproj" />
     <Project Path="src/TelegramBotPlatform.UnitTests/TelegramBotPlatform.UnitTests.csproj" />
+    <Project Path="src/TelegramBotPlatform.IntegrationTests/TelegramBotPlatform.IntegrationTests.csproj" />
     <Project Path="src/TelegramBotPlatform.WebApi/TelegramBotPlatform.WebApi.csproj" />
   </Folder>
   <Folder Name="/samples/">
