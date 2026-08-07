@@ -24,6 +24,10 @@ public sealed record HostedBot(PlatformTestHost Platform, BotResponse Registrati
     public Task<HttpResponseMessage> Deliver(string text) =>
         Platform.Anonymous.PostWebhook(WebhookPath, WebhookSecret, text);
 
+    /// <summary>Delivers a message the platform is expected to accept, for a test that is about what happens next.</summary>
+    public async Task DeliverOk(string text) =>
+        await AdminApi.AssertStatus(await Deliver(text), HttpStatusCode.OK);
+
     /// <summary>Delivers a message and waits for the bot's reply, returning every reply it has sent so far.</summary>
     public async Task<IReadOnlyList<string>> DeliverAndAwaitReply(string text, CancellationToken cancellationToken)
     {

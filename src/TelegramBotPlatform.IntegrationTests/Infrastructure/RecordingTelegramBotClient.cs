@@ -17,10 +17,17 @@ namespace TelegramBotPlatform.IntegrationTests.Infrastructure;
 /// bot's credentials were used to send them.
 /// </para>
 /// </summary>
-public sealed class RecordingTelegramBotClient(long botId, string token) : ITelegramBotClient
+/// <param name="failure">
+/// Consulted per call, so a test can make Telegram refuse a specific request — the failure the platform
+/// cannot check for in advance, because it only happens once the call is made. Returning null (the
+/// default) is Telegram accepting everything, which is what every other test wants.
+/// </param>
+public sealed class RecordingTelegramBotClient(long botId, string token, Func<IRequest, Exception?>? failure = null)
+    : ITelegramBotClient
 {
     private readonly Lock _gate = new();
     private readonly List<IRequest> _requests = [];
+    private readonly Func<IRequest, Exception?> _failure = failure ?? (_ => null);
 
     /// <summary>The plaintext token this client was built from — how tests check a rotation took effect.</summary>
     public string Token { get; } = token;
@@ -97,7 +104,11 @@ public sealed class RecordingTelegramBotClient(long botId, string token) : ITele
             _requests.Add(request);
         }
 
-        return Task.FromResult(Response<TResponse>());
+        // Recorded before it is failed: "the platform did try" and "Telegram refused" are different
+        // facts, and a test about the second still wants the first.
+        return _failure(request) is { } exception
+            ? Task.FromException<TResponse>(exception)
+            : Task.FromResult(Response<TResponse>());
     }
 
     public Task<bool> TestApi(CancellationToken cancellationToken = default) => Task.FromResult(true);

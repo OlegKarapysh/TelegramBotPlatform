@@ -76,6 +76,22 @@ public static class AdminApi
 
         public Task<HttpResponseMessage> RemoveBot(long botId) => client.DeleteAsync($"/admin/bots/{botId}");
 
+        // The "Ok" pair of each call above, for the tests that need the change to have happened rather
+        // than to inspect how it was reported — arranging a disabled bot, say. Keeping the two apart is
+        // what lets a test's assertions all live in one block: setup that must not fail says so here.
+
+        public Task DisableBotOk(long botId) => AssertStatus(client.DisableBot(botId), HttpStatusCode.OK);
+
+        public Task EnableBotOk(long botId) => AssertStatus(client.EnableBot(botId), HttpStatusCode.OK);
+
+        public Task RotateTokenOk(long botId, string token) =>
+            AssertStatus(client.RotateToken(botId, token), HttpStatusCode.OK);
+
+        public Task RemoveBotOk(long botId) => AssertStatus(client.RemoveBot(botId), HttpStatusCode.NoContent);
+
+        public Task RemoveBehaviorOk(string packageName) =>
+            AssertStatus(client.RemoveBehavior(packageName), HttpStatusCode.NoContent);
+
         public async Task<BehaviorsResponse> ListBehaviors()
         {
             var response = await client.GetAsync("/admin/behaviors");
@@ -139,6 +155,9 @@ public static class AdminApi
         /// <summary>The <c>error</c> a refusal carries. Never contains a bot token — that is asserted where it matters.</summary>
         public Task<ApiError> ReadError() => response.Read<ApiError>();
     }
+
+    private static async Task AssertStatus(Task<HttpResponseMessage> request, HttpStatusCode expected) =>
+        await AssertStatus(await request, expected);
 
     /// <summary>Asserts the status, quoting the body when it does not match so a failure explains itself.</summary>
     public static async Task AssertStatus(HttpResponseMessage response, HttpStatusCode expected)

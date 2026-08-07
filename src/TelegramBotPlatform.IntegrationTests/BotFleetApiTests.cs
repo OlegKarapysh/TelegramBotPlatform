@@ -12,7 +12,7 @@ namespace TelegramBotPlatform.IntegrationTests;
 /// <em>all-or-nothing across two systems</em> — the durable registry and the running receiver — which
 /// neither the service nor the registry can demonstrate on its own.
 /// </summary>
-public class BotFleetApiTests
+public sealed class BotFleetApiTests
 {
     private const string FirstBotToken = "111:first-bot-secret-token";
     private const string SecondBotToken = "222:second-bot-secret-token";
@@ -26,19 +26,16 @@ public class BotFleetApiTests
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var bot = await response.Read<BotResponse>();
-
         Assert.Equal($"/admin/bots/{bot.BotId}", response.Headers.Location?.ToString());
         Assert.Equal(111, bot.TelegramBotId);
         Assert.Equal("bot111", bot.Username);
         Assert.Equal("Support bot", bot.Label);
         Assert.Equal("echo", bot.BehaviorKey);
         Assert.Equal(nameof(BotStatus.Active), bot.Status);
-
-        // The registry and the receiver agree: it is listed, and it is running under its own credentials.
+        // The registry and the receiver agree: listed, and running under its own credentials.
         Assert.Equal(bot.BotId, Assert.Single(await platform.Admin.ListBots()).BotId);
         var client = platform.Clients.Client(bot.BotId);
         Assert.Equal(FirstBotToken, client.Token);
-
         var webhook = client.SingleRequest<SetWebhookRequest>();
         Assert.Equal($"https://platform.test/telegram-bot/webhook/{bot.BotId}", webhook.Url);
         Assert.False(string.IsNullOrWhiteSpace(webhook.SecretToken));
@@ -48,7 +45,6 @@ public class BotFleetApiTests
     public async Task TheBotToken_IsNeverEchoedBack_ByAnyReadOfTheBot()
     {
         await using var platform = PlatformTestHost.Start();
-
         var created = await platform.Admin.RegisterBot("Support bot", "echo", FirstBotToken);
         var bot = await created.Read<BotResponse>();
 
@@ -79,7 +75,6 @@ public class BotFleetApiTests
             Assert.DoesNotContain(
                 Encoding.UTF8.GetString(stored.EncryptedToken), "first-bot-secret-token", StringComparison.Ordinal);
             Assert.NotEqual(Encoding.UTF8.GetBytes(FirstBotToken), stored.EncryptedToken);
-
             // And the platform can still get it back, through the real Data Protection key ring.
             Assert.Equal(
                 FirstBotToken, services.GetRequiredService<ITokenProtector>().Unprotect(stored.EncryptedToken));
@@ -167,19 +162,17 @@ public class BotFleetApiTests
     {
         await using var platform = PlatformTestHost.Start();
         var bot = await platform.RegisterBot("Support bot", "echo", FirstBotToken);
-        await AdminApi.AssertStatus(await platform.Admin.DisableBot(bot.Id), HttpStatusCode.OK);
+        await platform.Admin.DisableBotOk(bot.Id);
 
         var response = await platform.Admin.EnableBot(bot.Id);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(nameof(BotStatus.Active), (await bot.Current()).Status);
-
         // Enabling rebuilds the client from scratch, so this is the original token coming back out of the
         // encrypted column through the key ring — nothing was kept in memory across the disable.
         Assert.Equal(FirstBotToken, bot.Client.Token);
         Assert.Equal(
             $"https://platform.test/telegram-bot/webhook/{bot.Id}", bot.Client.SingleRequest<SetWebhookRequest>().Url);
-
         // And it is genuinely serving again, not merely marked Active.
         Assert.Equal(["echo: back up"], await bot.DeliverAndAwaitReply("back up", TestContext.Current.CancellationToken));
     }
@@ -202,8 +195,7 @@ public class BotFleetApiTests
     {
         await using var platform = PlatformTestHost.Start();
         var bot = await platform.RegisterBot("Support bot", "echo", FirstBotToken);
-        await AdminApi.AssertStatus(
-            await platform.Admin.RotateToken(bot.Id, "111:rotated-secret-token"), HttpStatusCode.OK);
+        await platform.Admin.RotateTokenOk(bot.Id, "111:rotated-secret-token");
 
         // A rotation replaces the client, so the reply has to go out through the *new* one.
         var replies = await bot.DeliverAndAwaitReply("hello", TestContext.Current.CancellationToken);
@@ -240,6 +232,71 @@ public class BotFleetApiTests
         Assert.DoesNotContain(bot.Id, platform.Clients.LiveBotIds);
     }
 
+    // Every other refusal on this surface is decided before the registry is touched. Registering a
+    // webhook cannot be: it is a live call, so it fails after the row already exists. Both systems are
+    // visible from here, which is the only place their disagreement shows.
+
+    [Fact]
+    public async Task Register_LeavesNothingBehind_WhenTelegramRefusesTheWebhook()
+    {
+        await using var platform = PlatformTestHost.Start();
+        platform.Clients.FailEvery<SetWebhookRequest>("Telegram refused the webhook.");
+
+        var response = await platform.Admin.RegisterBot("Support bot", "echo", FirstBotToken);
+
+        // Not a 500 with a bot stranded behind it: a refusal, and a fleet exactly as it was.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(await platform.Admin.ListBots());
+        Assert.Empty(platform.Clients.LiveBotIds);
+    }
+
+    [Fact]
+    public async Task Register_CanBeRetried_OnceTheWebhookIsAcceptedAgain()
+    {
+        await using var platform = PlatformTestHost.Start();
+        platform.Clients.FailEvery<SetWebhookRequest>("Telegram refused the webhook.");
+        await platform.Admin.RegisterBot("Support bot", "echo", FirstBotToken);
+        platform.Clients.AcceptEverything();
+
+        var bot = await platform.RegisterBot("Support bot", "echo", FirstBotToken);
+
+        // A half-registered bot would still hold the unique Telegram bot id and answer 409 forever — the
+        // fleet could not be repaired through the API that broke it.
+        Assert.Equal(["echo: hello"], await bot.DeliverAndAwaitReply("hello", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Enable_StaysDisabled_WhenTelegramRefusesTheWebhook()
+    {
+        await using var platform = PlatformTestHost.Start();
+        var bot = await platform.RegisterBot("Support bot", "echo", FirstBotToken);
+        await platform.Admin.DisableBotOk(bot.Id);
+        platform.Clients.FailEvery<SetWebhookRequest>("Telegram refused the webhook.");
+
+        var response = await platform.Admin.EnableBot(bot.Id);
+
+        // Active-but-not-receiving is the state an operator cannot act on, because every read says the
+        // bot is fine.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(nameof(BotStatus.Disabled), (await bot.Current()).Status);
+    }
+
+    [Fact]
+    public async Task AFailedRegistration_LeavesEveryOtherBotRunning()
+    {
+        await using var platform = PlatformTestHost.Start();
+        var running = await platform.RegisterBot("First", "echo", FirstBotToken);
+        platform.Clients.FailEvery<SetWebhookRequest>("Telegram refused the webhook.");
+
+        var response = await platform.Admin.RegisterBot("Second", "echo", SecondBotToken);
+
+        // The rollback removes a bot; it must remove the one that failed, and nothing else.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal([running.Id], platform.Clients.LiveBotIds);
+        Assert.Equal(running.Id, Assert.Single(await platform.Admin.ListBots()).BotId);
+        Assert.Equal(["echo: still here"], await running.DeliverAndAwaitReply("still here", TestContext.Current.CancellationToken));
+    }
+
     public static TheoryData<string> LifecycleCalls => ["disable", "enable", "rotate", "remove"];
 
     [Theory]
@@ -266,10 +323,11 @@ public class BotFleetApiTests
         var first = await platform.RegisterBot("First", "echo", FirstBotToken);
         var second = await platform.RegisterBot("Second", "echo", SecondBotToken);
 
-        await AdminApi.AssertStatus(await platform.Admin.DisableBot(first.Id), HttpStatusCode.OK);
-        await AdminApi.AssertStatus(await platform.Admin.RemoveBot(first.Id), HttpStatusCode.NoContent);
+        var disabled = await platform.Admin.DisableBot(first.Id);
+        var removed = await platform.Admin.RemoveBot(first.Id);
 
-        // The fleet is per-bot: taking one down must not touch another's registration, client or webhook.
+        Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
         Assert.Equal(nameof(BotStatus.Active), (await second.Current()).Status);
         Assert.Equal(SecondBotToken, second.Client.Token);
         Assert.Empty(second.Client.RequestsOf<DeleteWebhookRequest>());

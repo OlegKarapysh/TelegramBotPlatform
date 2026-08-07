@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Telegram.Bot;
+using Telegram.Bot.Requests.Abstractions;
 using TelegramBotPlatform.Public;
 
 namespace TelegramBotPlatform.IntegrationTests.Infrastructure;
@@ -16,6 +17,23 @@ public sealed class RecordingBotClientRegistry : IBotClientRegistry
 
     /// <summary>Bot ids with a live client, i.e. the bots the supervisor currently has running.</summary>
     public IReadOnlyList<long> LiveBotIds => _clients.Keys.Order().ToArray();
+
+    /// <summary>
+    /// Makes Telegram refuse calls, for the failures the platform can only discover by making one — a
+    /// <c>setWebhook</c> against an unreachable API, or a URL Telegram will not accept.
+    /// <para>
+    /// Consulted per call rather than fixed when a client is created, so a test can arm it around exactly
+    /// the operation it is about and leave every other call working. Null (the default) is Telegram
+    /// behaving.
+    /// </para>
+    /// </summary>
+    public Func<IRequest, Exception?>? Failure { get; set; }
+
+    /// <summary>Arms <see cref="Failure"/> for one request type — the usual shape of "Telegram refused this".</summary>
+    public void FailEvery<TRequest>(string reason) where TRequest : IRequest =>
+        Failure = request => request is TRequest ? new HttpRequestException(reason) : null;
+
+    public void AcceptEverything() => Failure = null;
 
     /// <summary>The recording client for <paramref name="botId"/>, failing the test if the bot never started.</summary>
     public RecordingTelegramBotClient Client(long botId)
@@ -43,7 +61,10 @@ public sealed class RecordingBotClientRegistry : IBotClientRegistry
         return found;
     }
 
-    public void Set(long botId, string token) => _clients[botId] = new RecordingTelegramBotClient(botId, token);
+    // The failure hook is read through this registry on every call, not captured here, so arming it after
+    // a client already exists still affects that client.
+    public void Set(long botId, string token) =>
+        _clients[botId] = new RecordingTelegramBotClient(botId, token, request => Failure?.Invoke(request));
 
     public void Remove(long botId) => _clients.TryRemove(botId, out _);
 }

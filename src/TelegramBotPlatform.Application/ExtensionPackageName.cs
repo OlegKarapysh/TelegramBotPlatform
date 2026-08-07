@@ -10,7 +10,8 @@ namespace TelegramBotPlatform.Application;
 /// multipart <c>filename=</c> header, which a Windows client may fill with a full backslash path — and
 /// <see cref="Path.GetFileName(string)"/> treats '\' as a separator only on Windows, so without the
 /// normalisation below the same upload would be accepted on a developer's machine and rejected on the
-/// Linux container.
+/// Linux container. Which is also why the segment strip is done here rather than by
+/// <see cref="Path.GetFileName(string)"/> at all — see <see cref="StripPathSegments"/>.
 /// </para>
 /// </summary>
 public static class ExtensionPackageName
@@ -26,8 +27,7 @@ public static class ExtensionPackageName
         }
 
         // Strip any path segments first, so a traversal attempt is reduced rather than reasoned about.
-        // Backslashes are folded to '/' beforehand so both separators are stripped on every platform.
-        var fileName = Path.GetFileName(suppliedName.Trim().Replace('\\', '/'));
+        var fileName = StripPathSegments(suppliedName.Trim());
 
         if (string.IsNullOrEmpty(fileName))
         {
@@ -71,6 +71,25 @@ public static class ExtensionPackageName
         }
 
         return validated;
+    }
+
+    /// <summary>
+    /// Everything after the last '/' or '\', on every host OS — deliberately <em>not</em>
+    /// <see cref="Path.GetFileName(string)"/>, which is OS-aware in more ways than the separator it
+    /// recognises.
+    /// <para>
+    /// On Windows it also strips a drive-relative prefix, so <c>C:evil.dll</c> comes back as
+    /// <c>evil.dll</c> there and unchanged on Linux — where the ':' then fails the character check. That
+    /// is exactly the accepted-here/rejected-in-CI split this class exists to prevent, and folding '\'
+    /// beforehand does not close it. Stripping only the two separators leaves the ':' in place on both,
+    /// so a drive-relative name is refused everywhere rather than quietly reinterpreted on one platform.
+    /// </para>
+    /// </summary>
+    private static string StripPathSegments(string name)
+    {
+        var lastSeparator = name.LastIndexOfAny(['/', '\\']);
+
+        return lastSeparator < 0 ? name : name[(lastSeparator + 1)..];
     }
 
     private static bool IsAllowed(char character) =>

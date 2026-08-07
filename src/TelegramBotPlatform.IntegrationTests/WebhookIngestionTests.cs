@@ -10,7 +10,7 @@ namespace TelegramBotPlatform.IntegrationTests;
 /// check, registry lookup, MassTransit, the bot-scope filter, the router, the catalog — so this is the
 /// only level at which the path can be checked at all.
 /// </summary>
-public class WebhookIngestionTests
+public sealed class WebhookIngestionTests
 {
     private const string EchoBotToken = "111:echo-bot-token";
     private const string OtherBotToken = "222:other-bot-token";
@@ -33,14 +33,13 @@ public class WebhookIngestionTests
     {
         await using var platform = PlatformTestHost.Start();
         var bot = await platform.RegisterBot("Echo bot", "echo", EchoBotToken);
+        var published = bot.Client.SingleRequest<SetWebhookRequest>();
 
-        // Both the path and the secret come from the setWebhook call the supervisor made — nothing here
-        // re-derives them. If the URL the platform advertises to Telegram and the route it maps ever
-        // disagreed, or the secret it registered and the one it checks were derived differently, this
-        // would stop being an accepted request.
-        var url = bot.Client.SingleRequest<SetWebhookRequest>();
-        var response = await platform.Anonymous.PostWebhook(new Uri(url.Url).AbsolutePath, url.SecretToken, "hello");
+        var response = await platform.Anonymous.PostWebhook(
+            new Uri(published.Url).AbsolutePath, published.SecretToken, "hello");
 
+        // Path and secret both come from the setWebhook the supervisor made, so this stops being an
+        // accepted request the moment the URL it advertises and the route it maps disagree.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(["echo: hello"], await bot.Client.WaitForSentMessages(1, TestContext.Current.CancellationToken));
     }
@@ -54,10 +53,10 @@ public class WebhookIngestionTests
         var echoBot = await platform.RegisterBot("Echo bot", "echo", EchoBotToken);
         var reverseBot = await platform.RegisterBot("Reverse bot", SamplePlugin.BehaviorKey, OtherBotToken);
 
-        await AdminApi.AssertStatus(await echoBot.Deliver("abc"), HttpStatusCode.OK);
-        await AdminApi.AssertStatus(await reverseBot.Deliver("abc"), HttpStatusCode.OK);
+        await echoBot.DeliverOk("abc");
+        await reverseBot.DeliverOk("abc");
 
-        // Same text, two bots, two behaviors — and neither reply came out of the other bot's client.
+        // Same text, two bots, two behaviors — neither reply came out of the other bot's client.
         Assert.Equal(["echo: abc"], await echoBot.Client.WaitForSentMessages(1, TestContext.Current.CancellationToken));
         Assert.Equal(["cba"], await reverseBot.Client.WaitForSentMessages(1, TestContext.Current.CancellationToken));
         Assert.Equal(EchoBotToken, echoBot.Client.Token);
@@ -72,10 +71,9 @@ public class WebhookIngestionTests
 
         var rejected = await platform.Anonymous.PostWebhook(bot.WebhookPath, secret: null, "smuggled");
 
+        // A negative is only worth asserting once something has provably flowed through: the legitimate
+        // delivery below is answered, and the rejected one is still the only thing that produced nothing.
         Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
-
-        // A negative is only worth asserting once something has provably flowed through: this delivery is
-        // accepted and answered, and the rejected one still produced nothing.
         Assert.Equal(["echo: legitimate"], await bot.DeliverAndAwaitReply("legitimate", TestContext.Current.CancellationToken));
     }
 
@@ -140,12 +138,12 @@ public class WebhookIngestionTests
         await using var platform = PlatformTestHost.Start();
         var bot = await platform.RegisterBot("Echo bot", "echo", EchoBotToken);
         var secret = bot.WebhookSecret;
-        await AdminApi.AssertStatus(await platform.Admin.DisableBot(bot.Id), HttpStatusCode.OK);
+        await platform.Admin.DisableBotOk(bot.Id);
+
+        var response = await platform.Anonymous.PostWebhook($"/telegram-bot/webhook/{bot.Id}", secret, "hello");
 
         // Disabling deletes the webhook, but deliveries already in flight keep arriving with a valid
         // secret. A disabled bot must not process them.
-        var response = await platform.Anonymous.PostWebhook($"/telegram-bot/webhook/{bot.Id}", secret, "hello");
-
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Empty(bot.Client.SentMessages);
     }
@@ -172,12 +170,14 @@ public class WebhookIngestionTests
         var first = await platform.RegisterBot("First", ScopeResolvingBehavior.BehaviorKey, EchoBotToken);
         var second = await platform.RegisterBot("Second", ScopeResolvingBehavior.BehaviorKey, OtherBotToken);
 
-        await AdminApi.AssertStatus(await first.Deliver("hello"), HttpStatusCode.OK);
-        await AdminApi.AssertStatus(await second.Deliver("hello"), HttpStatusCode.OK);
+        var toFirst = await first.Deliver("hello");
+        var toSecond = await second.Deliver("hello");
 
-        // Nothing tells the scope which bot it belongs to except the consume filter, which sets it from the
-        // message before the consumer is built. Get that wrong and a bot answers with someone else's
+        // Nothing tells the scope which bot it belongs to except the consume filter, which sets it from
+        // the message before the consumer is built. Get that wrong and a bot answers with someone else's
         // credentials — or, for an id nothing is registered under, cannot answer at all.
+        Assert.Equal(HttpStatusCode.OK, toFirst.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, toSecond.StatusCode);
         Assert.Equal(
             [$"resolved for bot {first.Id}"],
             await first.Client.WaitForSentMessages(1, TestContext.Current.CancellationToken));
@@ -223,10 +223,10 @@ public class WebhookIngestionTests
         var brokenBot = await platform.RegisterBot("Broken", failing.Key, EchoBotToken);
         var healthyBot = await platform.RegisterBot("Healthy", "echo", OtherBotToken);
 
-        await AdminApi.AssertStatus(await brokenBot.Deliver("boom"), HttpStatusCode.OK);
+        await brokenBot.DeliverOk("boom");
         await failing.WaitForHandled(1, TestContext.Current.CancellationToken);
 
-        // The throw is swallowed at the router, so the bus keeps draining and every other bot is unaffected.
+        // The throw is contained at the router, so the bus keeps draining and other bots are unaffected.
         Assert.Equal(["echo: fine"], await healthyBot.DeliverAndAwaitReply("fine", TestContext.Current.CancellationToken));
         Assert.Empty(brokenBot.Client.SentMessages);
     }

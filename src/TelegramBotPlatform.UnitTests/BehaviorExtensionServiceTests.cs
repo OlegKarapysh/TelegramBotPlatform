@@ -12,9 +12,9 @@ namespace TelegramBotPlatform.UnitTests;
 /// point of the store/loader seam. Every guarantee the spec makes about rejection cleanup, replacement
 /// rollback, in-use protection, and startup restore is asserted here rather than left to manual checks.
 /// </summary>
-public class BehaviorExtensionServiceTests
+public sealed class BehaviorExtensionServiceTests
 {
-    private static readonly TimeSpan NoRetries = TimeSpan.Zero;
+    private static readonly TimeSpan _noRetries = TimeSpan.Zero;
 
     // --- Upload -------------------------------------------------------------------------------------
 
@@ -46,8 +46,7 @@ public class BehaviorExtensionServiceTests
     [InlineData(@"C:\uploads\Reverse.dll")]
     public async Task Upload_StripsPathSegments_FromTheSuppliedName(string suppliedName)
     {
-        // A multipart filename= header carries whatever the client put there, including a full Windows
-        // path. What gets stored — and reported back — must not depend on which OS the host runs on.
+        // A multipart filename= header carries whatever the client put there, including a full path.
         var store = new InMemoryExtensionStore();
         var loader = new FakeExtensionLoader().Yields("Reverse.dll", "reverse");
         var service = CreateService(store, loader);
@@ -148,8 +147,8 @@ public class BehaviorExtensionServiceTests
     [Fact]
     public async Task Upload_Rejects_WhenThePackageExceedsTheConfiguredLimit()
     {
-        // The endpoint rejects on declared length once form binding has buffered the part; the service
-        // still refuses oversize content so the guarantee does not depend on a single call site.
+        // The endpoint also rejects on declared length; refusing here keeps the ceiling a property of
+        // the operation rather than of one call site.
         var store = new InMemoryExtensionStore();
         var loader = new FakeExtensionLoader().Yields("Big.dll", "big");
         var service = CreateService(store, loader, maxPackageBytes: 8);
@@ -200,10 +199,8 @@ public class BehaviorExtensionServiceTests
         await service.Replace("Reverse.dll", Package("v2"), TestContext.Current.CancellationToken);
 
         Assert.True(store.Contains("Reverse.dll"));
-
         loader.Yields("Reverse.dll", "reverse");
         var third = await service.Replace("Reverse.dll", Package("v3"), TestContext.Current.CancellationToken);
-
         Assert.True(third.IsSuccess);
         Assert.Equal("v3", Encoding.UTF8.GetString(store.Bytes("Reverse.dll")!));
     }
@@ -242,7 +239,6 @@ public class BehaviorExtensionServiceTests
 
         Assert.True(result.IsFailed);
         Assert.Equal("v1", Encoding.UTF8.GetString(store.Bytes("Reverse.dll")!));
-        // The previous behavior is back and the abandoned new build was released.
         Assert.True(catalog.TryGet("reverse", out _));
         Assert.False(catalog.TryGet("reverse-v2", out _));
         Assert.Equal(1, loader.Handles[1].DisposeCount);
@@ -304,12 +300,10 @@ public class BehaviorExtensionServiceTests
         var loader = new FakeExtensionLoader().Fails("Reverse.dll");
         var catalog = new BehaviorCatalog();
         var service = CreateService(store, loader, catalog);
-        await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
         Assert.False(service.Packages[0].Loaded);
-
         loader.Yields("Reverse.dll", "reverse");
         var result = await service.Replace("Reverse.dll", Package("fixed"), TestContext.Current.CancellationToken);
-
         Assert.True(result.IsSuccess);
         Assert.True(service.Packages[0].Loaded);
         Assert.True(catalog.TryGet("reverse", out _));
@@ -390,14 +384,15 @@ public class BehaviorExtensionServiceTests
         var service = CreateService(store, loader);
         await service.Upload("Reverse.dll", Package(), TestContext.Current.CancellationToken);
 
-        for (var i = 0; i < 50; i++)
+        var results = new List<bool>();
+        for (var build = 0; build < 50; build++)
         {
             loader.Yields("Reverse.dll", "reverse");
-            var result = await service.Replace("Reverse.dll", Package($"v{i}"), TestContext.Current.CancellationToken);
-            Assert.True(result.IsSuccess);
+            var result = await service.Replace("Reverse.dll", Package($"v{build}"), TestContext.Current.CancellationToken);
+            results.Add(result.IsSuccess);
         }
 
-        // 51 handles produced; every one but the live one is released, with no double-dispose.
+        Assert.All(results, Assert.True);
         Assert.Equal(51, loader.Handles.Count);
         Assert.Equal(50, loader.DisposedCount);
         Assert.All(loader.Handles, handle => Assert.InRange(handle.DisposeCount, 0, 1));
@@ -411,7 +406,7 @@ public class BehaviorExtensionServiceTests
     {
         var service = CreateService();
 
-        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        var result = await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Empty(service.Packages);
@@ -427,7 +422,7 @@ public class BehaviorExtensionServiceTests
         var catalog = new BehaviorCatalog();
         var service = CreateService(store, loader, catalog);
 
-        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        var result = await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.True(catalog.TryGet("a", out _));
@@ -445,11 +440,10 @@ public class BehaviorExtensionServiceTests
         var catalog = new BehaviorCatalog();
         var service = CreateService(store, loader, catalog);
 
-        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        var result = await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.True(catalog.TryGet("good", out _));
-
         var broken = service.Packages.Single(package => package.PackageName == "Broken.dll");
         Assert.False(broken.Loaded);
         Assert.Empty(broken.BehaviorKeys);
@@ -462,7 +456,7 @@ public class BehaviorExtensionServiceTests
         var store = new InMemoryExtensionStore { FailList = true };
         var service = CreateService(store);
 
-        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        var result = await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsFailed);
         Assert.IsType<StoreUnavailableError>(result.Errors.First());
@@ -487,8 +481,8 @@ public class BehaviorExtensionServiceTests
     [Fact]
     public async Task RestoreAll_RetriesAPackageRead_AndSucceedsWhenTheStoreRecovers()
     {
-        // The same outage that makes the listing flaky makes the reads flaky. Retrying only the listing
-        // would leave a package marked broken for the process's whole life over a blip it rode out once.
+        // Retrying only the listing would leave a package marked broken for the process's whole life
+        // over a blip the listing itself rode out.
         var store = new InMemoryExtensionStore { FailReadTimes = 2 };
         store.Seed("A.dll");
         var loader = new FakeExtensionLoader().Yields("A.dll", "a");
@@ -511,7 +505,7 @@ public class BehaviorExtensionServiceTests
         store.FailRead = true;
         var service = CreateService(store);
 
-        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        var result = await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.False(Assert.Single(service.Packages).Loaded);
@@ -520,8 +514,8 @@ public class BehaviorExtensionServiceTests
     [Fact]
     public async Task RestoreAll_RecordsAStoredNameItRefusesToTrust_WithoutLoadingIt()
     {
-        // The store's contents are not necessarily only what this platform put there — a stray object in
-        // the bucket, or a prefix misconfigured to "", can surface a name that is about to become a path.
+        // The store's contents are not necessarily only what this platform put there, and a name is
+        // about to become a file path.
         var store = new InMemoryExtensionStore();
         store.Seed("../escape.dll");
         store.Seed("Good.dll");
@@ -529,11 +523,10 @@ public class BehaviorExtensionServiceTests
         var catalog = new BehaviorCatalog();
         var service = CreateService(store, loader, catalog);
 
-        var result = await service.RestoreAll(NoRetries, TestContext.Current.CancellationToken);
+        var result = await service.RestoreAll(_noRetries, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.True(catalog.TryGet("good", out _));
-
         var rejected = service.Packages.Single(package => package.PackageName == "../escape.dll");
         Assert.False(rejected.Loaded);
         Assert.DoesNotContain(loader.Handles, handle => handle.PackageName.Contains("escape", StringComparison.Ordinal));

@@ -56,11 +56,21 @@ A MassTransit consume filter (`BotScopeFilter<T>`, applied to every `IBotScopedM
 scoped `IBotContext` **before** the consumer is constructed, so a constructor-injected `ITelegramBotClient` resolves
 to *that* bot's client. `BotSupervisor` owns each bot's receiver lifecycle (start/stop/rotate/remove) and is the
 only thing `BotRegistrationService` touches to bring a bot up or down (via the `IBotLifecycle` seam, keeping
-Application free of an Infrastructure reference). `BotHealthTracker` marks a repeatedly-failing bot `Failing` while
-keeping it running at normal cadence (no backoff, no auto-disable), and clears it on the next success. It is
-**scoped** (it reads/writes the scoped `IBotRegistry`) and every update is consumed in its own scope, so its
-consecutive-failure counts live in the singleton `BotFailureCounter` — counting on the tracker itself makes
-`Failing` unreachable in the running host while every unit test that reuses one tracker still passes.
+Application free of an Infrastructure reference). Starting a receiver is the one step that can fail *after* the
+registry has been written — it is a live `setWebhook` — so `Register` and `Enable` undo their own registry write
+when it does, and report a `Result` failure rather than letting the exception escape as a 500 with a
+half-registered bot behind it. `RotateToken` deliberately does not roll back: the superseded token may already be
+revoked, so the new one is kept and the refusal says the receiver still needs bringing up.
+
+`BotHealthTracker` marks a repeatedly-failing bot `Failing` while keeping it running at normal cadence (no
+backoff, no auto-disable), and clears it on the next success. It is **scoped** (it reads/writes the scoped
+`IBotRegistry`) and every update is consumed in its own scope, so its consecutive-failure counts live in the
+singleton `BotFailureCounter` — counting on the tracker itself makes `Failing` unreachable in the running host
+while every unit test that reuses one tracker still passes. `Failing` is *durable* but the counts are not, which
+is why `BotFailureCounter.RecordSuccess` also answers true on the **first** success it sees for a bot: without
+that, a bot left `Failing` by a previous process stays flagged for as long as it keeps working, because there is
+no in-memory streak to break. The same counter is cleared (`Forget`) on disable/remove, so a bot brought back
+does not inherit the streak it went down with.
 
 ### Layers (strict dependency direction)
 
@@ -90,9 +100,12 @@ consecutive-failure counts live in the singleton `BotFailureCounter` — countin
   deadline shared by the listing and every package read, so the delay does not scale with package count. A
   single unloadable package is logged, skipped, and reported via `GET /admin/behaviors`.
 - **Package names are validated in both directions**, by `ExtensionPackageName`. On the way in, `Validate`
-  *normalises* (a client's `filename=` may carry a full path — backslashes are folded first so the result
-  never depends on the host OS). On the way back out of a store, `ValidateStored` *refuses* anything it would
-  have to rewrite: a tidied name would no longer address the object the store actually holds.
+  *normalises* (a client's `filename=` may carry a full path). It strips everything up to the last `/` or `\`
+  **itself** rather than calling `Path.GetFileName`, which is OS-aware in more ways than the separator it
+  recognises — on Windows it also strips a drive-relative prefix, so `C:evil.dll` came back as the valid
+  `evil.dll` there and unchanged (then rejected on the `:`) on Linux. Keep the strip OS-blind; the same upload
+  must not be accepted locally and refused in CI. On the way back out of a store, `ValidateStored` *refuses*
+  anything it would have to rewrite: a tidied name would no longer address the object the store actually holds.
 - **Bot tokens are encrypted at rest** via `ITokenProtector` (Data Protection, key ring in
   `platform.DataProtectionKeys`) — never stored in plaintext, never logged. Keeping the "never logged" half true
   takes two deliberate measures, because the token travels in the Telegram request **path**
@@ -156,6 +169,22 @@ Two projects, both xUnit v3 on **Microsoft.Testing.Platform** (MTP) — test pro
 Because of MTP mode, pass the target explicitly: `dotnet test --solution TelegramBotPlatform.slnx` or
 `--project <test>.csproj`. Never a mocking library — collaborators are small hand-written fakes.
 
+### How a test is written
+
+- **Arrange, act, assert — three blank-line-separated blocks, no `// Arrange` labels.** The names carry
+  that; the blank lines carry the shape. **One act per test**: if a test needs a second act to make its
+  point, it is two tests. And **assertions only in the last block** — a check in the arrange block is a
+  setup guard, and belongs behind an `...Ok` helper instead (see below).
+- **Setup that must not fail says so, without asserting**: `RegisterBotOk`, `GetBotOk`, `UploadBehaviorOk`,
+  `DisableBotOk`, `EnableBotOk`, `RotateTokenOk`, `RemoveBotOk`, `RemoveBehaviorOk` on `AdminApi`, and
+  `HostedBot.DeliverOk`. Each fails the test with the response body quoted if the call did not do what the
+  arrange assumed. The bare `DisableBot`/`Deliver`/… variants are for when the *response itself* is what
+  the test is about.
+- **Comments earn their place or go.** Keep the class-level `<summary>` saying what the file is for, and
+  keep a comment that records a real past bug ("Regression: …") or a why that is not on the screen. Delete
+  anything that restates the assertion below it — the test name and the assertion are the description.
+- Test classes are `sealed`, like everything else here.
+
 ### `TelegramBotPlatform.UnitTests` — one component at a time
 
 Keep them **pure**: no network, Telegram, filesystem, or real database. The one sanctioned exception is
@@ -173,7 +202,7 @@ Exactly three things are substituted, all at the edges, all in `PlatformTestHost
 
 | Substituted | By | Why |
 |---|---|---|
-| Each bot's `ITelegramBotClient` | `RecordingBotClientRegistry` → `RecordingTelegramBotClient` | Telegram is the one true external system; tests assert on the calls the platform *made* |
+| Each bot's `ITelegramBotClient` | `RecordingBotClientRegistry` → `RecordingTelegramBotClient` | Telegram is the one true external system; tests assert on the calls the platform *made* — and, via `Clients.FailEvery<TRequest>`, on what it does when Telegram *refuses* one |
 | `IBotTokenValidator` | `ScriptedTokenValidator` (`<id>:<secret>` ⇒ bot `<id>`) | It is a live `getMe` call; the seam exists for exactly this |
 | Npgsql | EF in-memory provider, per `PlatformDatabase` | No Docker in CI; the real `PostgresBotRegistry` and key ring sit on top |
 

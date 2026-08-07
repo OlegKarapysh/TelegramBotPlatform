@@ -4,7 +4,7 @@ namespace TelegramBotPlatform.IntegrationTests;
 /// What the host has to have done <em>before</em> it serves its first request, and what it must refuse to
 /// start at all for. These properties are startup ordering, so nothing below the host level can check them.
 /// </summary>
-public class PlatformStartupTests
+public sealed class PlatformStartupTests
 {
     [Fact]
     public async Task Health_IsServed_WithoutAnAdminKey()
@@ -37,13 +37,12 @@ public class PlatformStartupTests
         await using var platform = PlatformTestHost.Start(
             new PlatformTestSettings { PluginsDirectory = pluginsDirectory.Path });
 
-        // Assignable on the very first request, with no upload in this process — the package was picked up
-        // from durable storage during startup.
         var behaviors = await platform.Admin.ListBehaviors();
 
+        // Assignable on the very first request, with no upload in this process — the package was picked
+        // up from durable storage during startup.
         var reverse = Assert.Single(behaviors.Behaviors, behavior => behavior.Key == SamplePlugin.BehaviorKey);
         Assert.Equal($"extension:{SamplePlugin.FileName}", reverse.Source);
-
         var package = Assert.Single(behaviors.Packages);
         Assert.True(package.Loaded);
         Assert.Equal([SamplePlugin.BehaviorKey], package.BehaviorKeys);
@@ -62,13 +61,12 @@ public class PlatformStartupTests
 
         var behaviors = await platform.Admin.ListBehaviors();
 
-        // One bad package is contained: it is named, explained and still addressable for repair, while the
-        // good package next to it loaded and the host came up.
+        // One bad package is contained: named, explained and addressable for repair, while the good
+        // package next to it loaded and the host came up.
         var broken = Assert.Single(behaviors.Packages, package => package.PackageName == "Broken.dll");
         Assert.False(broken.Loaded);
         Assert.Empty(broken.BehaviorKeys);
         Assert.NotNull(broken.Error);
-
         Assert.Contains(behaviors.Packages, package => package is { PackageName: SamplePlugin.FileName, Loaded: true });
         Assert.Contains(behaviors.Behaviors, behavior => behavior.Key == SamplePlugin.BehaviorKey);
         Assert.Contains(behaviors.Behaviors, behavior => behavior.Key == "echo");
@@ -79,11 +77,11 @@ public class PlatformStartupTests
     {
         var store = new ControllableExtensionStore { IsReachable = false };
 
+        var start = () => PlatformTestHost.Start(new PlatformTestSettings { ExtensionStore = store }).Dispose();
+
         // Fail closed: the process never binds a port, so a rollout gated on health rolls back instead of
         // going green with behaviors silently missing.
-        var failure = Assert.Throws<InvalidOperationException>(
-            () => PlatformTestHost.Start(new PlatformTestSettings { ExtensionStore = store }).Dispose());
-
+        var failure = Assert.Throws<InvalidOperationException>(start);
         Assert.Contains("Refusing to serve", failure.Message, StringComparison.Ordinal);
     }
 

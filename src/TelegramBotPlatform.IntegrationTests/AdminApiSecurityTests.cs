@@ -6,7 +6,7 @@ namespace TelegramBotPlatform.IntegrationTests;
 /// route — a filter attached to the group is easy to lose when a route is added — and that a rejected
 /// request never reaches its handler.
 /// </summary>
-public class AdminApiSecurityTests(AdminApiSecurityTests.Platform platform)
+public sealed class AdminApiSecurityTests(AdminApiSecurityTests.Platform platform)
     : IClassFixture<AdminApiSecurityTests.Platform>
 {
     /// <summary>
@@ -100,8 +100,6 @@ public class AdminApiSecurityTests(AdminApiSecurityTests.Platform platform)
     [Fact]
     public async Task AnUnauthenticatedRequest_NeverReachesTheHandler()
     {
-        // Not just the status code: the filter has to run before the endpoint, or an attacker's 401 would
-        // still have registered a bot.
         using var request = new HttpRequestMessage(HttpMethod.Post, "/admin/bots")
         {
             Content = JsonContent.Create(new { label = "Smuggled", behaviorKey = "echo", token = "999:token" })
@@ -109,6 +107,8 @@ public class AdminApiSecurityTests(AdminApiSecurityTests.Platform platform)
 
         var response = await platform.Host.Anonymous.SendAsync(request, TestContext.Current.CancellationToken);
 
+        // Not just the status code: the filter has to run before the endpoint, or an attacker's 401 would
+        // still have registered a bot.
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Empty(await platform.Host.Admin.ListBots());
         Assert.Empty(platform.Host.Clients.LiveBotIds);
@@ -117,10 +117,10 @@ public class AdminApiSecurityTests(AdminApiSecurityTests.Platform platform)
     [Fact]
     public async Task TheTelegramFacingSurface_IsNotBehindTheAdminKey()
     {
-        // The webhook is authenticated by its own per-bot secret, not the admin key — it has to stay
-        // reachable without one, or Telegram could never deliver an update.
         var response = await platform.Host.Anonymous.PostWebhook("/telegram-bot/webhook/1", secret: null, "hello");
 
+        // The webhook is authenticated by its own per-bot secret, so it answers on its own terms rather
+        // than being refused for want of an admin key Telegram does not have.
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

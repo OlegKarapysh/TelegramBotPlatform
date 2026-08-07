@@ -10,9 +10,9 @@ using TelegramBotPlatform.Public.Bots;
 
 namespace TelegramBotPlatform.UnitTests;
 
-public class BotUpdateRouterTests
+public sealed class BotUpdateRouterTests
 {
-    private static readonly Update SampleUpdate = new();
+    private static readonly Update _sampleUpdate = new();
 
     [Fact]
     public async Task Route_DispatchesToTheBotsAssignedBehavior()
@@ -24,11 +24,11 @@ public class BotUpdateRouterTests
         catalog.Register(behavior, "built-in");
         var router = CreateRouter(registry, catalog);
 
-        await router.Route(botId: 1, SampleUpdate, TestContext.Current.CancellationToken);
+        await router.Route(botId: 1, _sampleUpdate, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, behavior.CallCount);
         Assert.Equal(1, behavior.LastContext!.BotId);
-        Assert.Same(SampleUpdate, behavior.LastContext.Update);
+        Assert.Same(_sampleUpdate, behavior.LastContext.Update);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public class BotUpdateRouterTests
         catalog.Register(behavior, "built-in");
         var router = CreateRouter(registry, catalog);
 
-        await router.Route(botId: 999, SampleUpdate, TestContext.Current.CancellationToken);
+        await router.Route(botId: 999, _sampleUpdate, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, behavior.CallCount);
     }
@@ -53,7 +53,7 @@ public class BotUpdateRouterTests
         var catalog = new BehaviorCatalog();
         var router = CreateRouter(registry, catalog);
 
-        var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, SampleUpdate, TestContext.Current.CancellationToken));
+        var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, _sampleUpdate, TestContext.Current.CancellationToken));
 
         Assert.Null(exception);
     }
@@ -67,7 +67,7 @@ public class BotUpdateRouterTests
         catalog.Register(new ThrowingBehavior(), "built-in");
         var router = CreateRouter(registry, catalog);
 
-        var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, SampleUpdate, TestContext.Current.CancellationToken));
+        var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, _sampleUpdate, TestContext.Current.CancellationToken));
 
         Assert.Null(exception);
     }
@@ -89,7 +89,7 @@ public class BotUpdateRouterTests
             new BotHealthTracker(registry, new BotFailureCounter(), NullLogger<BotHealthTracker>.Instance),
             NullLogger<BotUpdateRouter>.Instance);
 
-        var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, SampleUpdate, TestContext.Current.CancellationToken));
+        var exception = await Record.ExceptionAsync(() => router.Route(botId: 1, _sampleUpdate, TestContext.Current.CancellationToken));
 
         Assert.Null(exception);
         Assert.Equal(0, behavior.CallCount);

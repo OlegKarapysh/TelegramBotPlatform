@@ -4,7 +4,9 @@ namespace TelegramBotPlatform.Application;
 /// Tracks per-bot update-handling health. After repeated consecutive failures a bot is marked
 /// <see cref="BotStatus.Failing"/> while its receiver keeps running at normal cadence — no backoff, no
 /// auto-disable; the operator decides whether to disable/rotate/remove. A later success clears the flag
-/// back to <see cref="BotStatus.Active"/>. Never touches a bot the operator has explicitly disabled.
+/// back to <see cref="BotStatus.Active"/>, including a success in a <em>later process</em> than the one
+/// that set it — the flag is durable, so clearing it must not depend on in-memory counts that are not.
+/// Never touches a bot the operator has explicitly disabled.
 /// </summary>
 public sealed class BotHealthTracker(
     IBotRegistry botRegistry, BotFailureCounter failureCounter, ILogger<BotHealthTracker> logger)
@@ -34,7 +36,9 @@ public sealed class BotHealthTracker(
 
     public async Task RecordSuccess(long botId, CancellationToken cancellationToken = default)
     {
-        if (!failureCounter.Clear(botId))
+        // Asks the counter, not itself, whether the persisted status is worth a look: a bot can be
+        // Failing on record with no in-memory streak behind it, which is what every restart produces.
+        if (!failureCounter.RecordSuccess(botId))
         {
             return;
         }
